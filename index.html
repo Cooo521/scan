@@ -458,9 +458,17 @@ function applyTent(prof,ic,delta,half){ for(let k=1;k<N_PROF;k++){ const wt=1-Ma
 /* ---------------- 紙のふちを自動で見つける ---------------- */
 function detect(src,size,quick){
   const W0=src.width, H0=src.height, sc=Math.min(1,(size||DET)/Math.max(W0,H0));
-  const w=Math.max(16,Math.round(W0*sc)), h=Math.max(16,Math.round(H0*sc)), n=w*h;
+  const w=Math.max(16,Math.round(W0*sc)), h=Math.max(16,Math.round(H0*sc));
   const c=mkCanvas(w,h), g=ctx2d(c); g.drawImage(src,0,0,w,h);
-  const d=g.getImageData(0,0,w,h).data;
+  const r=detectData(g.getImageData(0,0,w,h).data,w,h,{profiles:!quick});
+  if(!r.found) return {geom:fullGeom(W0,H0,0.03),found:false};
+  const inv=1/sc, geom={c:r.c.map(p=>({x:clamp(p.x*inv,0,W0),y:clamp(p.y*inv,0,H0)})), p:{}};
+  for(const e in r.p) geom.p[e]=r.p[e].map(v=>v*inv);
+  return {geom,found:true,score:r.score,name:r.name};
+}
+// 縮小した画像の画素から紙の四隅とふちの曲がりを探す（裏側の作業場所でも動く）
+function detectData(d,w,h,opt){
+  const n=w*h;
   let L=new Float32Array(n), C=new Float32Array(n);
   for(let i=0,j=0;i<n;i++,j+=4){ const r=d[j],gg=d[j+1],b=d[j+2];
     L[i]=0.299*r+0.587*gg+0.114*b; C[i]=Math.max(r,gg,b)-Math.min(r,gg,b); }
@@ -509,16 +517,11 @@ function detect(src,size,quick){
 
   cands.sort((a,b)=>b.score-a.score);
   const best=cands[0];
-  if(!best||best.score<0.1) return {geom:fullGeom(W0,H0,0.03),found:false};
+  if(!best||best.score<0.1) return {found:false};
   const geom={c:best.q.map(p=>({x:p.x,y:p.y})), p:{top:emptyProf(),right:emptyProf(),bottom:emptyProf(),left:emptyProf()}};
-  if(!quick){
-    refineCorners(best.mask,M,w,h,geom);
-    for(const e of ['top','bottom','left','right']) geom.p[e]=edgeProfile(best.mask,M,w,h,geom,e);
-  }
-  const inv=1/sc;
-  geom.c=geom.c.map(p=>({x:clamp(p.x*inv,0,W0),y:clamp(p.y*inv,0,H0)}));
-  for(const e in geom.p) geom.p[e]=geom.p[e].map(v=>v*inv);
-  return {geom,found:true,score:best.score,name:best.name,cands:cands.map(c=>c.name+':'+c.score.toFixed(3))};
+  refineCorners(best.mask,M,w,h,geom);              // 角を明るさの変わり目にぴったり合わせる
+  if(opt&&opt.profiles) for(const e of ['top','bottom','left','right']) geom.p[e]=edgeProfile(best.mask,M,w,h,geom,e);
+  return {found:true,c:geom.c,p:geom.p,score:best.score,name:best.name};
 }
 function sampleM(M,w,h,x,y){ if(x<0||y<0||x>w-1.001||y>h-1.001) return 0; const x0=x|0,y0=y|0,fx=x-x0,fy=y-y0,i=y0*w+x0;
   return (M[i]*(1-fx)+M[i+1]*fx)*(1-fy)+(M[i+w]*(1-fx)+M[i+w+1]*fx)*fy; }
@@ -841,8 +844,22 @@ document.querySelectorAll('[data-dest]').forEach(b=>b.onclick=()=>{
 });
 
 /* ======================= ② カメラ ======================= */
-const Cam = { stream:null, track:null, ic:null, timer:0, raw:null, quad:null, lostAt:0, stableSince:0, armed:true, capQuad:null, busy:false, light:false, small:null, starting:false };
+const Cam = { stream:null, track:null, ic:null, raw:null, target:null, disp:null, alpha:0, lostAt:0, lastSeen:0, stableSince:0, armed:true, capQuad:null,
+  busy:false, light:false, small:null, starting:false, inflight:false, reqId:0, reqScale:1, reqAt:0, jump:null, raf:0, lastFrame:0, vel:null, rawAt:0 };
 const cv = $('#cv'), ov = $('#cOverlay'), og = ov.getContext('2d');
+
+// ふち探しは裏側の作業場所（Worker）で動かして、カメラの映像を止めない
+let detWorker = null;
+try{
+  const fns = [blurBox,gradMag,dilate,invert,erode,borderFlood,fillHoles,largestComp,countMask,borderTouch,otsu,convexHull,hullOfMask,polyArea,
+    quadFromHull,orderCorners,quadOK,emptyProf,edgeFrame,sampleM,edgeSetup,findEdgeOffset,fitLine,intersect,refineCorners,edgeProfile,detectData];
+  const code = 'const N_PROF='+N_PROF+';const EDGES='+JSON.stringify(EDGES)+';const clamp=(v,a,b)=>v<a?a:v>b?b:v;\n'
+    + fns.map(f=>f.toString()).join('\n')
+    + '\nonmessage=function(e){var m=e.data,r;try{r=detectData(new Uint8ClampedArray(m.buf),m.w,m.h,{profiles:false});}catch(err){r={found:false,err:String(err)};}postMessage({id:m.id,r:r});};';
+  detWorker = new Worker(URL.createObjectURL(new Blob([code],{type:'text/javascript'})));
+  detWorker.onmessage = e=>onDetected(e.data.id, e.data.r);
+  detWorker.onerror = e=>{ console.warn('worker', e.message); detWorker = null; Cam.inflight = false; };
+}catch(e){ console.warn('worker off', e); detWorker = null; }
 
 async function startCamera(){
   if(Cam.stream || Cam.starting) return;
@@ -858,16 +875,18 @@ async function startCamera(){
     let caps = {}; try{ caps = Cam.track.getCapabilities ? Cam.track.getCapabilities() : {}; }catch(e){}
     $('#cLight').hidden = !caps.torch; Cam.light=false; $('#cLight').classList.remove('on');
     try{ if(caps.focusMode && caps.focusMode.indexOf('continuous')>=0) await Cam.track.applyConstraints({advanced:[{focusMode:'continuous'}]}); }catch(e){}
-    Cam.raw=null; Cam.quad=null; Cam.armed=true; Cam.stableSince=0;
-    clearTimeout(Cam.timer); Cam.timer = setTimeout(tick, 300);
+    Cam.raw=null; Cam.target=null; Cam.disp=null; Cam.alpha=0; Cam.armed=true; Cam.stableSince=0; Cam.inflight=false; Cam.jump=null;
+    setTimeout(requestDetect, 250);
+    if(!Cam.raf) Cam.raf = requestAnimationFrame(drawLoop);
   }catch(e){
     console.error(e); $('#cNoCam').hidden = false;
   }finally{ Cam.starting = false; }
 }
 function stopCamera(){
-  clearTimeout(Cam.timer); Cam.timer=0;
   if(Cam.stream){ Cam.stream.getTracks().forEach(t=>t.stop()); Cam.stream=null; Cam.track=null; Cam.ic=null; }
-  cv.srcObject = null; Cam.raw=null; Cam.quad=null; setRing(0);
+  cv.srcObject = null; Cam.raw=null; Cam.target=null; Cam.disp=null; Cam.alpha=0; Cam.inflight=false; setRing(0);
+  if(Cam.raf){ cancelAnimationFrame(Cam.raf); Cam.raf=0; }
+  og.setTransform(1,0,0,1,0,0); og.clearRect(0,0,ov.width,ov.height);
 }
 document.addEventListener('visibilitychange',()=>{
   if(document.hidden) stopCamera();
@@ -881,33 +900,51 @@ function videoRect(){
 }
 function setRing(p){ $('#cRing').setAttribute('stroke-dashoffset', String(232.5*(1-clamp(p,0,1)))); }
 function setHint(text, ok){ const h=$('#cHint'); if(h.textContent!==text) h.textContent=text; h.classList.toggle('ok', !!ok); }
+const qDist = (a,b)=>Math.max(...a.map((p,i)=>Math.hypot(p.x-b[i].x, p.y-b[i].y)));
 
-function tick(){
-  Cam.timer = 0;
-  if(!Cam.stream) return;
+// カメラの1コマを小さくして、裏側へふち探しを頼む
+function requestDetect(){
+  if(!Cam.stream || Cam.inflight) return;
   const vw = cv.videoWidth, vh = cv.videoHeight;
-  if(!vw || !vh){ Cam.timer = setTimeout(tick, 200); return; }
-  const t0 = performance.now();
+  if(!vw || !vh){ setTimeout(requestDetect, 150); return; }
   const s = LIVE/Math.max(vw,vh), w = Math.round(vw*s), h = Math.round(vh*s);
   if(!Cam.small || Cam.small.width!==w || Cam.small.height!==h) Cam.small = mkCanvas(w,h);
-  ctx2d(Cam.small).drawImage(cv,0,0,w,h);
-  let det = null; try{ det = detect(Cam.small, LIVE, true); }catch(e){ console.error(e); }
-  const now = performance.now(), diag = Math.hypot(vw,vh);
+  const g = ctx2d(Cam.small); g.drawImage(cv,0,0,w,h);
+  const img = g.getImageData(0,0,w,h);
+  Cam.inflight = true; Cam.reqScale = s; Cam.reqAt = performance.now(); const id = ++Cam.reqId;
+  if(detWorker){ detWorker.postMessage({id, buf:img.data.buffer, w, h}, [img.data.buffer]); }
+  else setTimeout(()=>{ let r; try{ r = detectData(img.data,w,h,{profiles:false}); }catch(e){ r={found:false}; } onDetected(id, r); }, 0);
+}
+function onDetected(id, r){
+  Cam.inflight = false;
+  if(!Cam.stream || id!==Cam.reqId) return;
+  const now = performance.now(), vw = cv.videoWidth, vh = cv.videoHeight, diag = Math.hypot(vw,vh), s = Cam.reqScale;
   let move = 1;
-  if(det && det.found){
-    const q = det.geom.c.map(p=>({x:p.x/s, y:p.y/s}));
-    if(Cam.raw) move = Math.max(...q.map((p,i)=>Math.hypot(p.x-Cam.raw[i].x, p.y-Cam.raw[i].y)))/diag;
-    Cam.raw = q;
-    Cam.quad = Cam.quad ? Cam.quad.map((p,i)=>({x:p.x+(q[i].x-p.x)*0.6, y:p.y+(q[i].y-p.y)*0.6})) : q;
-    Cam.lostAt = 0;
-    if(Cam.capQuad){ const d = Math.max(...q.map((p,i)=>Math.hypot(p.x-Cam.capQuad[i].x, p.y-Cam.capQuad[i].y)))/diag; if(d>0.08){ Cam.armed=true; Cam.capQuad=null; } }
+  if(r && r.found){
+    const q = r.c.map(p=>({x:p.x/s, y:p.y/s}));
+    let accept = true;
+    // 急に大きく飛んだ結果は、2回続いたときだけ信じる（取りちがえで枠が暴れないように）
+    if(Cam.raw && qDist(q,Cam.raw)/diag > 0.18){
+      if(Cam.jump && qDist(q,Cam.jump)/diag < 0.06){ Cam.jump = null; Cam.raw = null; }
+      else { Cam.jump = q; accept = false; }
+    } else Cam.jump = null;
+    if(accept){
+      if(Cam.raw){ move = qDist(q,Cam.raw)/diag;
+        // 動きの速さを覚えておき、計算にかかった時間のぶん先回りして枠を描く
+        const dt = Math.max(16, Cam.reqAt-Cam.rawAt), v = q.map((p,i)=>({x:(p.x-Cam.raw[i].x)/dt, y:(p.y-Cam.raw[i].y)/dt}));
+        Cam.vel = Cam.vel ? Cam.vel.map((o,i)=>({x:o.x*0.4+v[i].x*0.6, y:o.y*0.4+v[i].y*0.6})) : v;
+      } else Cam.vel = null;
+      Cam.raw = q; Cam.rawAt = Cam.reqAt; Cam.target = q; Cam.lastSeen = now; Cam.lostAt = 0;
+      if(Cam.capQuad && qDist(q,Cam.capQuad)/diag > 0.08){ Cam.armed = true; Cam.capQuad = null; }
+    }
   } else {
     if(!Cam.lostAt) Cam.lostAt = now;
-    if(now-Cam.lostAt > 450){ Cam.raw=null; Cam.quad=null; Cam.armed=true; Cam.capQuad=null; }
+    if(now-Cam.lostAt > 700){ Cam.raw=null; Cam.target=null; Cam.vel=null; Cam.armed=true; Cam.capQuad=null; Cam.jump=null; }
+    else if(Cam.vel) Cam.vel = Cam.vel.map(v=>({x:v.x*0.5, y:v.y*0.5}));
   }
   // 自動撮影：止まって構えたら撮る
   let prog = 0;
-  if(settings.auto && Cam.raw && Cam.armed && !Cam.busy){
+  if(settings.auto && Cam.raw && Cam.armed && !Cam.busy && !Cam.lostAt){
     if(move < 0.012){ if(!Cam.stableSince) Cam.stableSince = now; prog = (now-Cam.stableSince)/1100; }
     else Cam.stableSince = 0;
     if(prog >= 1){ Cam.stableSince=0; Cam.armed=false; Cam.capQuad=Cam.raw; capture(); prog=0; }
@@ -916,20 +953,38 @@ function tick(){
   if(!Cam.raw) setHint('紙を画面に入れてください', false);
   else if(!Cam.armed && settings.auto) setHint('撮りました。次のページへ', true);
   else setHint(settings.auto ? 'そのまま止めると自動で撮ります' : 'ふちを見つけました', true);
+  const spent = now - Cam.reqAt;
+  setTimeout(requestDetect, Math.max(15, 70 - spent));
+}
+// 青い枠は毎コマ描き直して、見つかった位置へなめらかに寄せる
+function drawLoop(t){
+  Cam.raf = requestAnimationFrame(drawLoop);
+  const dt = Cam.lastFrame ? Math.min(100, t-Cam.lastFrame) : 16; Cam.lastFrame = t;
+  if(Cam.target){
+    const ahead = Math.min(180, performance.now()-Cam.rawAt)*0.8;
+    const goal = Cam.vel ? Cam.target.map((p,i)=>({x:p.x+Cam.vel[i].x*ahead, y:p.y+Cam.vel[i].y*ahead})) : Cam.target;
+    if(!Cam.disp) Cam.disp = goal.map(p=>({x:p.x,y:p.y}));
+    const k = 1-Math.exp(-dt/40);
+    Cam.disp = Cam.disp.map((p,i)=>({x:p.x+(goal[i].x-p.x)*k, y:p.y+(goal[i].y-p.y)*k}));
+    Cam.alpha = Math.min(1, Cam.alpha + dt/120);
+  } else {
+    Cam.alpha = Math.max(0, Cam.alpha - dt/180);
+    if(Cam.alpha===0) Cam.disp = null;
+  }
   drawOverlay();
-  const spent = performance.now()-t0;
-  Cam.timer = setTimeout(tick, Math.max(60, 140-spent));
 }
 function drawOverlay(){
   const dpr = window.devicePixelRatio||1, r = videoRect();
   const W = Math.round(r.w*dpr), H = Math.round(r.h*dpr);
   if(ov.width!==W || ov.height!==H){ ov.width=W; ov.height=H; }
   og.setTransform(1,0,0,1,0,0); og.clearRect(0,0,W,H);
-  if(!Cam.quad || !cv.videoWidth) return;
-  const P = Cam.quad.map(p=>({x:(p.x*r.s+r.ox)*dpr, y:(p.y*r.s+r.oy)*dpr}));
+  if(!Cam.disp || !cv.videoWidth || Cam.alpha<=0) return;
+  const P = Cam.disp.map(p=>({x:(p.x*r.s+r.ox)*dpr, y:(p.y*r.s+r.oy)*dpr}));
+  og.globalAlpha = Cam.alpha;
   og.beginPath(); P.forEach((p,i)=> i?og.lineTo(p.x,p.y):og.moveTo(p.x,p.y)); og.closePath();
   og.fillStyle='rgba(79,140,255,0.18)'; og.fill();
   og.lineWidth=3*dpr; og.lineJoin='round'; og.strokeStyle='#4f8cff'; og.stroke();
+  og.globalAlpha = 1;
 }
 
 function grabFrame(){
