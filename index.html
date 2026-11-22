@@ -61,6 +61,9 @@ button{font:inherit;color:inherit;border:0;background:none;cursor:pointer;paddin
 .pill.on{background:#4f8cff;font-weight:700}
 #cFlash{position:absolute;inset:0;background:#fff;opacity:0;pointer-events:none;transition:opacity .25s}
 #cFlash.on{opacity:.7;transition:none}
+.appMode{position:absolute;inset:0 0 70px 0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;padding:24px;text-align:center;background:#111}
+.appMode b{font-size:18px}.appMode p{margin:0;font-size:14px;line-height:1.7;color:#c9ced8}
+.appMode button{min-height:52px;padding:0 26px;border-radius:14px;background:#4f8cff;font-weight:700;font-size:16px}
 .noCam{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;padding:24px;text-align:center;background:#111}
 .noCam p{margin:0;font-size:15px;line-height:1.7}
 .noCam button{min-height:48px;padding:0 20px;border-radius:14px;background:#4f8cff;font-weight:700}
@@ -197,6 +200,13 @@ button{font:inherit;color:inherit;border:0;background:none;cursor:pointer;paddin
       <button class="pill" id="cAuto" aria-pressed="false">自動撮影</button>
       <button class="pill" id="cSplit" aria-pressed="false">見開き分割</button>
       <button class="pill" id="cLight" aria-pressed="false" hidden>ライト</button>
+      <button class="pill" id="cMode" aria-pressed="false">カメラアプリで撮る</button>
+    </div>
+    <div class="appMode" id="cAppMode" hidden>
+      <svg aria-hidden="true" width="56" height="56" viewBox="0 0 24 24" fill="none" stroke="#6ea2ff" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M4 8.5A2.5 2.5 0 0 1 6.5 6h1.6l1.3-2h5.2l1.3 2h1.6A2.5 2.5 0 0 1 20 8.5v8A2.5 2.5 0 0 1 17.5 19h-11A2.5 2.5 0 0 1 4 16.5z"/><circle cx="12" cy="12.5" r="3.4"/></svg>
+      <b>カメラアプリで撮るモード</b>
+      <p>シャッターを押すとPixelのカメラが開きます。<br>撮って「✓」を押すと、ここに戻って自動で切り抜きます。</p>
+      <button id="cAppShoot">カメラを開く</button>
     </div>
     <div class="noCam" id="cNoCam" hidden>
       <p>カメラを使えませんでした。<br>カメラの許可を確かめてください。</p>
@@ -285,8 +295,8 @@ button{font:inherit;color:inherit;border:0;background:none;cursor:pointer;paddin
    かんたんスキャン — 選んだフォルダ用に撮って、PDFにしてドライブへ
    画像の処理はすべてスマホの中で行います（外には送りません）
    ========================================================= */
-const MAX_SRC = 3000;   // 元画像の長辺（px）
-const MAX_OUT = 2400;   // 仕上がりの長辺（px）
+const MAX_SRC = 4096;   // 元画像の長辺（px）
+const MAX_OUT = 3200;   // 仕上がりの長辺（px）A4で約270dpi
 const PREVIEW_OUT = 1100;
 const DET = 512;        // ふち検出に使う縮小サイズ
 const N_PROF = 32;      // ふちの曲がりを持つ点の数
@@ -313,7 +323,7 @@ async function loadFile(file){
   const iw = img.width||img.naturalWidth, ih = img.height||img.naturalHeight;
   const s = Math.min(1, MAX_SRC/Math.max(iw,ih));
   const c = mkCanvas(Math.round(iw*s), Math.round(ih*s));
-  const g = c.getContext('2d'); g.imageSmoothingQuality='high'; g.drawImage(img,0,0,c.width,c.height);
+  const g = c.getContext('2d',{willReadFrequently:true}); g.imageSmoothingQuality='high'; g.drawImage(img,0,0,c.width,c.height);
   if (img.close) img.close();
   return c;
 }
@@ -520,7 +530,8 @@ function detectData(d,w,h,opt){
   if(!best||best.score<0.1) return {found:false};
   const geom={c:best.q.map(p=>({x:p.x,y:p.y})), p:{top:emptyProf(),right:emptyProf(),bottom:emptyProf(),left:emptyProf()}};
   refineCorners(best.mask,M,w,h,geom);              // 角を明るさの変わり目にぴったり合わせる
-  if(opt&&opt.profiles) for(const e of ['top','bottom','left','right']) geom.p[e]=edgeProfile(best.mask,M,w,h,geom,e);
+  if(opt&&opt.flat) fitEdgesStraight(best.mask,M,w,h,geom);   // 1枚もの：4辺をまっすぐな線で合わせる
+  else if(opt&&opt.profiles) for(const e of ['top','bottom','left','right']) geom.p[e]=edgeProfile(best.mask,M,w,h,geom,e);
   return {found:true,c:geom.c,p:geom.p,score:best.score,name:best.name};
 }
 function sampleM(M,w,h,x,y){ if(x<0||y<0||x>w-1.001||y>h-1.001) return 0; const x0=x|0,y0=y|0,fx=x-x0,fy=y-y0,i=y0*w+x0;
@@ -562,6 +573,63 @@ function refineCorners(mask,M,w,h,geom){
   plan.forEach(([e1,a1,e2,a2],k)=>{ const l1=near(e1,a1), l2=near(e2,a2); if(!l1||!l2) return; const p=intersect(l1,l2);
     if(p&&Math.hypot(p.x-nc[k].x,p.y-nc[k].y)<diag*0.06) nc[k]=p; });
   if(quadOK(nc)) geom.c=nc;
+}
+// 1枚もののプリント：各辺のふちの点に直線を当てはめ（外れた点は捨てる）、4本の線の交点を角にする
+function fitEdgesStraight(mask,M,w,h,geom){
+  const lines=[];
+  for(const e of ['top','right','bottom','left']){
+    const E=edgeSetup(geom,e), F=E.F; let P=[];
+    for(let t=0.04;t<=0.961;t+=0.02){ const o=findEdgeOffset(mask,M,w,h,E,t); if(o===null) continue;
+      P.push({x:F.A.x+(F.B.x-F.A.x)*t+F.n.x*o, y:F.A.y+(F.B.y-F.A.y)*t+F.n.y*o}); }
+    if(P.length<8) return false;
+    let L=fitLine(P);
+    for(let it=0;it<3;it++){
+      const res=P.map(p=>Math.abs((p.x-L.x)*(-L.dy)+(p.y-L.y)*L.dx)), srt=res.slice().sort((a,b)=>a-b);
+      const thr=Math.max(0.8, srt[Math.floor(srt.length*0.5)]*2);
+      const Q=P.filter((p,i)=>res[i]<=thr); if(Q.length<6) break; P=Q; L=fitLine(P);
+    }
+    lines.push(L);
+  }
+  const nc=[intersect(lines[0],lines[3]),intersect(lines[0],lines[1]),intersect(lines[2],lines[1]),intersect(lines[2],lines[3])];
+  if(nc.some(p=>!p)) return false;
+  const diag=Math.hypot(geom.c[0].x-geom.c[2].x,geom.c[0].y-geom.c[2].y);
+  if(nc.some((p,i)=>Math.hypot(p.x-geom.c[i].x,p.y-geom.c[i].y)>diag*0.08) || !quadOK(nc)) return false;
+  geom.c=nc; return true;
+}
+// 復習テストの四すみの黒い四角を探す（4つそろったときだけ使う）。返すのは各四角の外側の角
+function findMarks(d,w,h,quad){
+  const n=w*h; let L=new Float32Array(n);
+  for(let i=0,j=0;i<n;i++,j+=4) L[i]=0.299*d[j]+0.587*d[j+1]+0.114*d[j+2];
+  L=blurBox(L,w,h,1);
+  const box = quad ? {x0:Math.min(...quad.map(p=>p.x)),x1:Math.max(...quad.map(p=>p.x)),y0:Math.min(...quad.map(p=>p.y)),y1:Math.max(...quad.map(p=>p.y))} : {x0:0,x1:w,y0:0,y1:h};
+  const pw=box.x1-box.x0, ph=box.y1-box.y0; if(pw<50||ph<50) return null;
+  const samp=[]; for(let y=Math.max(0,box.y0|0);y<Math.min(h,box.y1);y+=4) for(let x=Math.max(0,box.x0|0);x<Math.min(w,box.x1);x+=4) samp.push(L[y*w+x]);
+  samp.sort((a,b)=>a-b); const paper=samp[Math.floor(samp.length*0.75)]||200, thr=paper*0.42;
+  const dark=new Uint8Array(n); for(let i=0;i<n;i++) dark[i]=L[i]<thr?1:0;
+  const lab=new Int32Array(n), st=new Int32Array(n), blobs=[]; let cur=0;
+  for(let s0=0;s0<n;s0++){ if(!dark[s0]||lab[s0]) continue; cur++; let sp=0,cnt=0,x0=w,x1=0,y0=h,y1=0; st[sp++]=s0; lab[s0]=cur;
+    while(sp){ const i=st[--sp], x=i%w, y=(i/w)|0; cnt++; if(x<x0)x0=x; if(x>x1)x1=x; if(y<y0)y0=y; if(y>y1)y1=y;
+      if(x>0&&dark[i-1]&&!lab[i-1]){lab[i-1]=cur;st[sp++]=i-1;} if(x<w-1&&dark[i+1]&&!lab[i+1]){lab[i+1]=cur;st[sp++]=i+1;}
+      if(i>=w&&dark[i-w]&&!lab[i-w]){lab[i-w]=cur;st[sp++]=i-w;} if(i<n-w&&dark[i+w]&&!lab[i+w]){lab[i+w]=cur;st[sp++]=i+w;} }
+    const bw=x1-x0+1, bh=y1-y0+1, sz=Math.max(bw,bh);
+    if(sz<pw*0.012||sz>pw*0.07) continue;
+    if(Math.min(bw,bh)/sz<0.7||cnt/(bw*bh)<0.72) continue;
+    blobs.push({x0,x1:x1+1,y0,y1:y1+1,cx:(x0+x1+1)/2,cy:(y0+y1+1)/2,sz});
+  }
+  if(blobs.length<4) return null;
+  const corners=[{x:box.x0,y:box.y0},{x:box.x1,y:box.y0},{x:box.x1,y:box.y1},{x:box.x0,y:box.y1}], lim=Math.hypot(pw,ph)*0.22, picked=[];
+  for(const c of corners){ let best=null,bd=lim; for(const b of blobs){ if(picked.indexOf(b)>=0) continue; const dd=Math.hypot(b.cx-c.x,b.cy-c.y); if(dd<bd){bd=dd;best=b;} } if(!best) return null; picked.push(best); }
+  const sizes=picked.map(b=>b.sz), smin=Math.min(...sizes), smax=Math.max(...sizes); if(smax/smin>1.8) return null;
+  const outer=[{x:picked[0].x0,y:picked[0].y0},{x:picked[1].x1,y:picked[1].y0},{x:picked[2].x1,y:picked[2].y1},{x:picked[3].x0,y:picked[3].y1}];
+  if(!quadOK(outer) || polyArea(outer) < pw*ph*0.35) return null;
+  return outer;
+}
+// 黒い四角の外側の角を基準に、少しだけ外まで含めた枠を作る（四角が切れないように）
+function marksGeom(outer,scale,W0,H0){
+  const q=outer.map(p=>({x:p.x*scale,y:p.y*scale})), Hm=sqToQuad(q), m=0.012;
+  const g=fullGeom(W0,H0,0);
+  g.c=[hApply(Hm,-m,-m),hApply(Hm,1+m,-m),hApply(Hm,1+m,1+m),hApply(Hm,-m,1+m)].map(p=>({x:clamp(p.x,0,W0),y:clamp(p.y,0,H0)}));
+  return g;
 }
 function edgeProfile(mask,M,w,h,geom,e){
   const E=edgeSetup(geom,e), F=E.F, R=E.R;
@@ -641,42 +709,47 @@ function paramFor(A,q){ const M=A.length-1; let lo=0,hi=M;
   const d=A[hi]-A[lo]; return (lo+(d>1e-12?(q-A[lo])/d:0))/M; }
 function interpArr(arr,p){ const M=arr.length-1, f=clamp(p,0,1)*M; let i=Math.floor(f); if(i>=M) i=M-1; const s=f-i; return arr[i]*(1-s)+arr[i+1]*s; }
 
-function warp(sd,geom,W,H){
+function warp(sd,geom,W,H,ssIn){
   const sw=sd.width, sh=sd.height, S=sd.data;
   const Hm=sqToQuad(geom.c), Hi=hInv(Hm), M=256;
   const T=rectEdge(geom,'top',M,Hm,Hi), B=rectEdge(geom,'bottom',M,Hm,Hi), Lf=rectEdge(geom,'left',M,Hm,Hi), R=rectEdge(geom,'right',M,Hm,Hi);
   const aT=cumLen(T,W,H), aB=cumLen(B,W,H), aL=cumLen(Lf,W,H), aR=cumLen(R,W,H);
   const AU=new Float64Array(M+1), AV=new Float64Array(M+1);
   for(let i=0;i<=M;i++){ AU[i]=(aT[i]+aB[i])/2; AV[i]=(aL[i]+aR[i])/2; }
-  const out=new ImageData(W,H), O=out.data;
-  const cu=new Float64Array(W), tx=new Float64Array(W), ty=new Float64Array(W), bx=new Float64Array(W), by=new Float64Array(W);
-  for(let x=0;x<W;x++){ const u=paramFor(AU,(x+0.5)/W); cu[x]=u; tx[x]=interpArr(T.xs,u); ty[x]=interpArr(T.ys,u); bx[x]=interpArr(B.xs,u); by[x]=interpArr(B.ys,u); }
+  // 元の写真のほうが細かいときは 2×2 で平均して、縮めたときのギザギザを防ぐ
+  const ss = ssIn || (polyArea(geom.c)/(W*H) > 1.6 ? 2 : 1), WS=W*ss, inv=1/(ss*ss);
+  const out=new ImageData(W,H), O=out.data, acc=new Float32Array(W*3);
+  const cu=new Float64Array(WS), tx=new Float64Array(WS), ty=new Float64Array(WS), bx=new Float64Array(WS), by=new Float64Array(WS);
+  for(let x=0;x<WS;x++){ const u=paramFor(AU,(x+0.5)/WS); cu[x]=u; tx[x]=interpArr(T.xs,u); ty[x]=interpArr(T.ys,u); bx[x]=interpArr(B.xs,u); by[x]=interpArr(B.ys,u); }
   const a=Hm[0],b=Hm[1],c=Hm[2],d=Hm[3],e=Hm[4],f=Hm[5],g=Hm[6],h=Hm[7];
   const maxX=sw-1.001, maxY=sh-1.001, sw4=sw*4;
   for(let y=0;y<H;y++){
-    const v=paramFor(AV,(y+0.5)/H), lx=interpArr(Lf.xs,v), ly=interpArr(Lf.ys,v), rx=interpArr(R.xs,v), ry=interpArr(R.ys,v);
-    let o=y*W*4;
-    for(let x=0;x<W;x++){
-      const u=cu[x];
-      const px=(1-v)*tx[x]+v*bx[x]+(1-u)*lx+u*rx-u;
-      const py=(1-v)*ty[x]+v*by[x]+(1-u)*ly+u*ry-v;
-      const den=g*px+h*py+1;
-      let X=(a*px+b*py+c)/den-0.5, Y=(d*px+e*py+f)/den-0.5;
-      if(X<0)X=0; else if(X>maxX)X=maxX; if(Y<0)Y=0; else if(Y>maxY)Y=maxY;
-      const x0=X|0, y0=Y|0, fx=X-x0, fy=Y-y0, i0=y0*sw4+x0*4, i2=i0+sw4;
-      const w00=(1-fx)*(1-fy), w10=fx*(1-fy), w01=(1-fx)*fy, w11=fx*fy;
-      O[o]  =S[i0]*w00+S[i0+4]*w10+S[i2]*w01+S[i2+4]*w11;
-      O[o+1]=S[i0+1]*w00+S[i0+5]*w10+S[i2+1]*w01+S[i2+5]*w11;
-      O[o+2]=S[i0+2]*w00+S[i0+6]*w10+S[i2+2]*w01+S[i2+6]*w11;
-      O[o+3]=255; o+=4;
+    acc.fill(0);
+    for(let sy=0;sy<ss;sy++){
+      const v=paramFor(AV,(y*ss+sy+0.5)/(H*ss)), lx=interpArr(Lf.xs,v), ly=interpArr(Lf.ys,v), rx=interpArr(R.xs,v), ry=interpArr(R.ys,v);
+      for(let x=0;x<WS;x++){
+        const u=cu[x];
+        const px=(1-v)*tx[x]+v*bx[x]+(1-u)*lx+u*rx-u;
+        const py=(1-v)*ty[x]+v*by[x]+(1-u)*ly+u*ry-v;
+        const den=g*px+h*py+1;
+        let X=(a*px+b*py+c)/den-0.5, Y=(d*px+e*py+f)/den-0.5;
+        if(X<0)X=0; else if(X>maxX)X=maxX; if(Y<0)Y=0; else if(Y>maxY)Y=maxY;
+        const x0=X|0, y0=Y|0, fx=X-x0, fy=Y-y0, i0=y0*sw4+x0*4, i2=i0+sw4;
+        const w00=(1-fx)*(1-fy), w10=fx*(1-fy), w01=(1-fx)*fy, w11=fx*fy, k=((x/ss)|0)*3;
+        acc[k]  +=S[i0]*w00+S[i0+4]*w10+S[i2]*w01+S[i2+4]*w11;
+        acc[k+1]+=S[i0+1]*w00+S[i0+5]*w10+S[i2+1]*w01+S[i2+5]*w11;
+        acc[k+2]+=S[i0+2]*w00+S[i0+6]*w10+S[i2+2]*w01+S[i2+6]*w11;
+      }
     }
+    let o=y*W*4;
+    for(let x=0,k=0;x<W;x++,k+=3,o+=4){ O[o]=acc[k]*inv; O[o+1]=acc[k+1]*inv; O[o+2]=acc[k+2]*inv; O[o+3]=255; }
   }
   return {img:out, su:AU[M/2], sv:AV[M/2]};
 }
 
 /* ---------------- 仕上げ（影とり・くっきり・白黒） ---------------- */
 function makeLut(fn){ const l=new Uint8ClampedArray(1024); for(let i=0;i<1024;i++) l[i]=fn(i/512)*255; return l; }
-const LUT_SOFT=makeLut(v=>Math.pow(clamp((v-0.12)/0.78,0,1),1.25));
+const LUT_SOFT=makeLut(v=>Math.pow(clamp((v-0.1)/0.82,0,1),1.35));
 const LUT_BW=makeLut(v=>{ const t=clamp((v-0.56)/0.22,0,1); return t*t*(3-2*t); });
 function gridFilter(G,gw,gh,fn,init){ const o=new Float32Array(G.length);
   for(let y=0;y<gh;y++) for(let x=0;x<gw;x++){ let acc=init,cnt=0;
@@ -722,8 +795,16 @@ function enhance(img,mode){
   }
 }
 
+// 文字の輪郭を少しくっきりさせる（明るさだけに軽くかける）
+function sharpen(img,amount){
+  const w=img.width, h=img.height, d=img.data, n=w*h, L=new Float32Array(n);
+  for(let i=0,j=0;i<n;i++,j+=4) L[i]=0.299*d[j]+0.587*d[j+1]+0.114*d[j+2];
+  const B=blurBox(L,w,h,1);
+  for(let i=0,j=0;i<n;i++,j+=4){ const k=(L[i]-B[i])*amount; d[j]+=k; d[j+1]+=k; d[j+2]+=k; }
+}
+
 /* ---------------- 1ページを仕上げる ---------------- */
-function rotateCanvas(c,rot){ if(!rot) return c; const w=c.width, h=c.height, o=mkCanvas(rot%2?h:w, rot%2?w:h), g=o.getContext('2d');
+function rotateCanvas(c,rot){ if(!rot) return c; const w=c.width, h=c.height, o=mkCanvas(rot%2?h:w, rot%2?w:h), g=o.getContext('2d',{willReadFrequently:true});
   g.translate(o.width/2,o.height/2); g.rotate(rot*Math.PI/2); g.drawImage(c,-w/2,-h/2); return o; }
 function cropCanvas(c,x,y,w,h){ const o=mkCanvas(w,h); o.getContext('2d').drawImage(c,x,y,w,h,0,0,w,h); return o; }
 function renderPage(sd,page,maxOut){
@@ -731,6 +812,7 @@ function renderPage(sd,page,maxOut){
   const k=Math.min(1,maxOut/Math.max(W,H)); W=Math.max(16,Math.round(W*k)); H=Math.max(16,Math.round(H*k));
   const r=warp(sd,page.geom,W,H);
   enhance(r.img,page.filter);
+  if(page.filter!=='none') sharpen(r.img,0.6);
   let c=mkCanvas(W,H); c.getContext('2d').putImageData(r.img,0,0);
   c=rotateCanvas(c,page.rot);
   if(!page.split) return {list:[c],canvas:c};
@@ -793,12 +875,13 @@ async function buildZip(files){
 
 /* ======================= 送り先 ======================= */
 const DEST = {
-  'yuri-print': {child:'佑莉', kind:'塾プリント', parent:'佑莉の復習', folder:'【取込】塾プリント', color:'#5b9dff'},
-  'yuri-text':  {child:'佑莉', kind:'テキスト',   parent:'佑莉の復習', folder:'【取込】テキスト',   color:'#5b9dff'},
-  'yuri-test':  {child:'佑莉', kind:'テスト',     parent:'佑莉の復習', folder:'【取込】テスト',     color:'#5b9dff'},
-  'rio-book':   {child:'莉緒', kind:'問題集',     parent:'莉緒問題集', folder:'【取込】問題集',     color:'#f5a524'},
-  'rio-text':   {child:'莉緒', kind:'テキスト',   parent:'莉緒問題集', folder:'【取込】テキスト',   color:'#f5a524'},
-  'rio-test':   {child:'莉緒', kind:'テスト',     parent:'莉緒問題集', folder:'【取込】テスト',     color:'#f5a524'},
+  // curve: 本の形（見開きが曲がる）なら湾曲補正をする。1枚もののプリントはまっすぐな4辺で合わせる
+  'yuri-print': {child:'佑莉', kind:'塾プリント', parent:'佑莉の復習', folder:'【取込】塾プリント', color:'#5b9dff', curve:false},
+  'yuri-text':  {child:'佑莉', kind:'テキスト',   parent:'佑莉の復習', folder:'【取込】テキスト',   color:'#5b9dff', curve:true},
+  'yuri-test':  {child:'佑莉', kind:'テスト',     parent:'佑莉の復習', folder:'【取込】テスト',     color:'#5b9dff', curve:false},
+  'rio-book':   {child:'莉緒', kind:'問題集',     parent:'莉緒問題集', folder:'【取込】問題集',     color:'#f5a524', curve:true},
+  'rio-text':   {child:'莉緒', kind:'テキスト',   parent:'莉緒問題集', folder:'【取込】テキスト',   color:'#f5a524', curve:true},
+  'rio-test':   {child:'莉緒', kind:'テスト',     parent:'莉緒問題集', folder:'【取込】テスト',     color:'#f5a524', curve:false},
 };
 const LIVE = 384;          // 撮影中のふち検出の大きさ（px）
 
@@ -807,6 +890,7 @@ const state = { pages:[], dest:null, filter:'color', queue:Promise.resolve() };
 let nextId = 1;
 const settings = (()=>{ try{ return JSON.parse(localStorage.getItem('kscan2')||'{}'); }catch(e){ return {}; } })();
 if(settings.auto===undefined) settings.auto = true;
+if(settings.camApp===undefined) settings.camApp = false;
 if(!settings.split) settings.split = {};
 function saveSettings(){ try{ localStorage.setItem('kscan2', JSON.stringify(settings)); }catch(e){} }
 function enqueue(fn){ const p = state.queue.then(fn).catch(e=>{ console.error(e); toast('処理中にエラーが出ました'); }); state.queue = p; return p; }
@@ -821,13 +905,61 @@ function show(id){
   if(id==='camera') startCamera(); else stopCamera();
 }
 function newPage(geom){ const sp = settings.split[state.dest]||0; return {id:nextId++, geom, filter:state.filter, rot:0, split:sp>0, rtl:sp===2, outs:[], srcBlob:null, pending:true}; }
-async function finalizePage(page,sd,srcCanvas){
-  const r = renderPage(sd,page,MAX_OUT);
+/* ---- 撮ったページの仕上げ（重い処理は裏側の作業場所でする） ---- */
+function encodeJpeg(c,q){ return c.convertToBlob ? c.convertToBlob({type:'image/jpeg',quality:q}) : toBlob(c,q); }
+function scaledData(src,size){ const s=Math.min(1,size/Math.max(src.width,src.height)), w=Math.max(16,Math.round(src.width*s)), h=Math.max(16,Math.round(src.height*s));
+  const c=mkCanvas(w,h), g=ctx2d(c); g.drawImage(src,0,0,w,h); return g.getImageData(0,0,w,h); }
+async function processJob(m){
+  const sd=new ImageData(new Uint8ClampedArray(m.full),m.fw,m.fh);
+  let geom=m.geom, found=true, marks=false;
+  if(!geom){
+    const r=detectData(new Uint8ClampedArray(m.sm),m.sw,m.sh,{flat:m.flat,profiles:!m.flat}), k=m.fw/m.sw;
+    if(r.found){ geom={c:r.c.map(p=>({x:clamp(p.x*k,0,m.fw),y:clamp(p.y*k,0,m.fh)})),p:{}}; for(const e in r.p) geom.p[e]=r.p[e].map(v=>v*k); }
+    else if(m.liveQ){ geom=fullGeom(m.fw,m.fh,0); geom.c=m.liveQ.map(p=>({x:p.x*m.fw,y:p.y*m.fh})); found=false; }
+    else { geom=fullGeom(m.fw,m.fh,0.03); found=false; }
+    const km=m.mw/m.fw, mk=findMarks(new Uint8ClampedArray(m.mid),m.mw,m.mh,found?geom.c.map(p=>({x:p.x*km,y:p.y*km})):null);
+    if(mk){ geom=marksGeom(mk,1/km,m.fw,m.fh); marks=true; found=true; }
+  }
+  const out=renderPage(sd,{geom,filter:m.filter,rot:m.rot,split:m.split,rtl:m.rtl},m.maxOut), outs=[];
+  for(const c of out.list){ const blob=await encodeJpeg(c,0.88), tb=await encodeJpeg(thumbOf(c,420),0.8); outs.push({blob,tb,w:c.width,h:c.height}); }
+  let srcBlob=null;
+  if(m.wantSrc){ const c=mkCanvas(m.fw,m.fh); c.getContext('2d').putImageData(sd,0,0); srcBlob=await encodeJpeg(c,0.92); }
+  return {geom,found,marks,outs,srcBlob};
+}
+function makeWorker(fns, pre, post){
+  const code=pre+'\n'+fns.map(f=>f.toString()).join('\n')+'\n'+post;
+  return new Worker(URL.createObjectURL(new Blob([code],{type:'text/javascript'})));
+}
+const WPRE = 'const N_PROF='+N_PROF+';const EDGES='+JSON.stringify(EDGES)+';const clamp=(v,a,b)=>v<a?a:v>b?b:v;';
+const DET_FNS = [blurBox,gradMag,dilate,invert,erode,borderFlood,fillHoles,largestComp,countMask,borderTouch,otsu,convexHull,hullOfMask,polyArea,
+  quadFromHull,orderCorners,quadOK,emptyProf,edgeFrame,sampleM,edgeSetup,findEdgeOffset,fitLine,intersect,refineCorners,fitEdgesStraight,edgeProfile,detectData];
+let procWorker=null; const procWait=new Map(); let procSeq=0;
+try{
+  procWorker = makeWorker(DET_FNS.concat([findMarks,marksGeom,fullGeom,sqToQuad,hApply,hInv,profAt,edgePoint,edgePolyline,polyLen,estimateAspect,outSize,
+      rectEdge,cumLen,paramFor,interpArr,warp,makeLut,gridFilter,enhance,sharpen,rotateCanvas,cropCanvas,renderPage,thumbOf,encodeJpeg,processJob]),
+    WPRE+'function mkCanvas(w,h){return new OffscreenCanvas(w,h);}function ctx2d(c){return c.getContext("2d",{willReadFrequently:true});}',
+    'const LUT_SOFT=makeLut(v=>Math.pow(clamp((v-0.1)/0.82,0,1),1.35));const LUT_BW=makeLut(v=>{const t=clamp((v-0.56)/0.22,0,1);return t*t*(3-2*t);});'
+    +'onmessage=async function(e){var id=e.data.id;try{var r=await processJob(e.data.m);postMessage({id:id,ok:true,r:r});}catch(err){postMessage({id:id,ok:false,err:String(err&&err.stack||err)});}};');
+  procWorker.onmessage = e=>{ const w=procWait.get(e.data.id); if(!w) return; procWait.delete(e.data.id); e.data.ok ? w.res(e.data.r) : w.rej(new Error(e.data.err)); };
+  procWorker.onerror = e=>{ console.warn('proc worker', e.message); procWorker=null; for(const w of procWait.values()) w.rej(new Error('worker')); procWait.clear(); };
+}catch(e){ console.warn('proc worker off', e); procWorker=null; }
+function procRun(m,tr){ return new Promise((res,rej)=>{ const id=++procSeq; procWait.set(id,{res,rej}); procWorker.postMessage({id,m},tr); }); }
+async function runProcess(src,o){
+  const build=()=>{ const full=ctx2d(src).getImageData(0,0,src.width,src.height), sm=scaledData(src,DET), mid=scaledData(src,1024);
+    return {m:Object.assign({full:full.data.buffer,fw:src.width,fh:src.height,sm:sm.data.buffer,sw:sm.width,sh:sm.height,mid:mid.data.buffer,mw:mid.width,mh:mid.height,maxOut:MAX_OUT},o),
+            tr:[full.data.buffer,sm.data.buffer,mid.data.buffer]}; };
+  if(procWorker){ try{ const j=build(); return await procRun(j.m,j.tr); }catch(e){ console.warn('裏側の処理に失敗、表で処理します', e); } }
+  const j=build(); return await processJob(j.m);
+}
+function applyResult(page,res){
+  page.geom=res.geom; page.marks=res.marks;
   for(const o of page.outs) URL.revokeObjectURL(o.turl);
-  const outs = [];
-  for(const c of r.list){ const blob=await toBlob(c,0.86); const tb=await toBlob(thumbOf(c,420),0.8); outs.push({blob,w:c.width,h:c.height,turl:URL.createObjectURL(tb)}); }
-  page.outs = outs;
-  if(srcCanvas && !page.srcBlob) page.srcBlob = await toBlob(srcCanvas,0.92);
+  page.outs=res.outs.map(o=>({blob:o.blob,w:o.w,h:o.h,turl:URL.createObjectURL(o.tb)}));
+  if(res.srcBlob) page.srcBlob=res.srcBlob;
+}
+async function finalizePage(page,sd,srcCanvas){
+  const res=await runProcess(srcCanvas,{geom:page.geom,filter:page.filter,rot:page.rot,split:page.split,rtl:page.rtl,wantSrc:!page.srcBlob});
+  applyResult(page,res);
 }
 function allOuts(){ const a=[]; for(const p of state.pages) for(const o of p.outs) a.push(o); return a; }
 function clearBatch(){ for(const p of state.pages) for(const o of p.outs) URL.revokeObjectURL(o.turl); state.pages=[]; }
@@ -851,17 +983,14 @@ const cv = $('#cv'), ov = $('#cOverlay'), og = ov.getContext('2d');
 // ふち探しは裏側の作業場所（Worker）で動かして、カメラの映像を止めない
 let detWorker = null;
 try{
-  const fns = [blurBox,gradMag,dilate,invert,erode,borderFlood,fillHoles,largestComp,countMask,borderTouch,otsu,convexHull,hullOfMask,polyArea,
-    quadFromHull,orderCorners,quadOK,emptyProf,edgeFrame,sampleM,edgeSetup,findEdgeOffset,fitLine,intersect,refineCorners,edgeProfile,detectData];
-  const code = 'const N_PROF='+N_PROF+';const EDGES='+JSON.stringify(EDGES)+';const clamp=(v,a,b)=>v<a?a:v>b?b:v;\n'
-    + fns.map(f=>f.toString()).join('\n')
-    + '\nonmessage=function(e){var m=e.data,r;try{r=detectData(new Uint8ClampedArray(m.buf),m.w,m.h,{profiles:false});}catch(err){r={found:false,err:String(err)};}postMessage({id:m.id,r:r});};';
-  detWorker = new Worker(URL.createObjectURL(new Blob([code],{type:'text/javascript'})));
+  detWorker = makeWorker(DET_FNS, WPRE,
+    'onmessage=function(e){var m=e.data,r;try{r=detectData(new Uint8ClampedArray(m.buf),m.w,m.h,{profiles:false,flat:m.flat});}catch(err){r={found:false,err:String(err)};}postMessage({id:m.id,r:r});};');
   detWorker.onmessage = e=>onDetected(e.data.id, e.data.r);
   detWorker.onerror = e=>{ console.warn('worker', e.message); detWorker = null; Cam.inflight = false; };
 }catch(e){ console.warn('worker off', e); detWorker = null; }
 
 async function startCamera(){
+  if(settings.camApp){ $('#cNoCam').hidden = true; setHint('',false); return; }
   if(Cam.stream || Cam.starting) return;
   $('#cNoCam').hidden = true;
   if(!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia){ $('#cNoCam').hidden=false; return; }
@@ -875,7 +1004,7 @@ async function startCamera(){
     let caps = {}; try{ caps = Cam.track.getCapabilities ? Cam.track.getCapabilities() : {}; }catch(e){}
     $('#cLight').hidden = !caps.torch; Cam.light=false; $('#cLight').classList.remove('on');
     try{ if(caps.focusMode && caps.focusMode.indexOf('continuous')>=0) await Cam.track.applyConstraints({advanced:[{focusMode:'continuous'}]}); }catch(e){}
-    Cam.raw=null; Cam.target=null; Cam.disp=null; Cam.alpha=0; Cam.armed=true; Cam.stableSince=0; Cam.inflight=false; Cam.jump=null;
+    Cam.raw=null; Cam.target=null; Cam.disp=null; Cam.alpha=0; Cam.armed=true; Cam.stableSince=0; Cam.inflight=false; Cam.jump=null; Cam.photoPs=undefined;
     setTimeout(requestDetect, 250);
     if(!Cam.raf) Cam.raf = requestAnimationFrame(drawLoop);
   }catch(e){
@@ -912,8 +1041,9 @@ function requestDetect(){
   const g = ctx2d(Cam.small); g.drawImage(cv,0,0,w,h);
   const img = g.getImageData(0,0,w,h);
   Cam.inflight = true; Cam.reqScale = s; Cam.reqAt = performance.now(); const id = ++Cam.reqId;
-  if(detWorker){ detWorker.postMessage({id, buf:img.data.buffer, w, h}, [img.data.buffer]); }
-  else setTimeout(()=>{ let r; try{ r = detectData(img.data,w,h,{profiles:false}); }catch(e){ r={found:false}; } onDetected(id, r); }, 0);
+  const flat = !DEST[state.dest].curve;
+  if(detWorker){ detWorker.postMessage({id, buf:img.data.buffer, w, h, flat}, [img.data.buffer]); }
+  else setTimeout(()=>{ let r; try{ r = detectData(img.data,w,h,{profiles:false,flat}); }catch(e){ r={found:false}; } onDetected(id, r); }, 0);
 }
 function onDetected(id, r){
   Cam.inflight = false;
@@ -989,7 +1119,7 @@ function drawOverlay(){
 
 function grabFrame(){
   const vw=cv.videoWidth, vh=cv.videoHeight, s=Math.min(1, MAX_SRC/Math.max(vw,vh));
-  const c = mkCanvas(Math.round(vw*s), Math.round(vh*s)); const g=c.getContext('2d'); g.imageSmoothingQuality='high'; g.drawImage(cv,0,0,c.width,c.height); return c;
+  const c = mkCanvas(Math.round(vw*s), Math.round(vh*s)); const g=c.getContext('2d',{willReadFrequently:true}); g.imageSmoothingQuality='high'; g.drawImage(cv,0,0,c.width,c.height); return c;
 }
 // 高画質の写真が横向きで返ってきたとき、カメラの映像と同じ向きに回す
 function thumbGray(c,W,H){ // 中央を W:H に切り出して小さな白黒に
@@ -1004,6 +1134,12 @@ function orientLike(photo, frame){
   for(const rot of [1,3]){ const r=rotateCanvas(photo,rot), t=thumbGray(r,W,H); let d=0; for(let i=0;i<t.length;i++) d+=Math.abs(t[i]-ref[i]); if(d<bestD){ bestD=d; best=r; } }
   return best;
 }
+async function photoSettings(){
+  if(Cam.photoPs!==undefined) return Cam.photoPs;
+  try{ const pc=await Cam.ic.getPhotoCapabilities(); Cam.photoPs=(pc.imageWidth&&pc.imageWidth.max)?{imageWidth:pc.imageWidth.max,imageHeight:pc.imageHeight.max}:null; }
+  catch(e){ Cam.photoPs=null; }
+  return Cam.photoPs;
+}
 function withTimeout(p,ms){ return Promise.race([p, new Promise((_,rej)=>setTimeout(()=>rej(new Error('timeout')),ms))]); }
 
 async function capture(){
@@ -1014,21 +1150,24 @@ async function capture(){
   const liveQ = Cam.raw ? Cam.raw.map(p=>({x:p.x/vw, y:p.y/vh})) : null;
   const frame = grabFrame();
   const page = newPage(null); state.pages.push(page); updateCamBar();
-  let src = frame;
+  let src = frame, kind = '映像';
   if(Cam.ic){
-    try{ const blob = await withTimeout(Cam.ic.takePhoto(), 5000); const ph = await loadFile(blob); src = orientLike(ph, frame); }
-    catch(e){ console.warn('takePhoto', e); }
+    try{
+      const ps = await photoSettings();
+      let blob; try{ blob = await withTimeout(Cam.ic.takePhoto(ps||undefined), 6000); }
+      catch(e){ if(!ps) throw e; blob = await withTimeout(Cam.ic.takePhoto(), 6000); }
+      const ph = await loadFile(blob); src = orientLike(ph, frame); kind = '写真';
+    }catch(e){ console.warn('takePhoto', e); }
   }
   Cam.busy = false;
-  processSrc(page, src, liveQ);
+  processSrc(page, src, liveQ, kind);
 }
-function processSrc(page, src, liveQ){
+function processSrc(page, src, liveQ, kind){
+  page.srcInfo = (kind||'画像')+' '+src.width+'×'+src.height;
+  const d = DEST[state.dest];
   enqueue(async()=>{
-    const det = detect(src);
-    let geom = det.geom;
-    if(!det.found && liveQ){ geom = fullGeom(src.width, src.height, 0); geom.c = liveQ.map(p=>({x:p.x*src.width, y:p.y*src.height})); }
-    page.geom = geom;
-    await finalizePage(page, imageDataOf(src), src);
+    const res = await runProcess(src, {liveQ, flat:!d.curve, filter:page.filter, rot:page.rot, split:page.split, rtl:page.rtl, wantSrc:true});
+    applyResult(page, res);
     page.pending = false; updateCamBar();
     if($('#review').classList.contains('active')) renderReview();
   });
@@ -1043,12 +1182,19 @@ function updateCamBar(){
   else if(last){ const sp=document.createElement('div'); sp.className='spin'; st.appendChild(sp); }
 }
 function syncCamToggles(){
+  const app = settings.camApp, m=$('#cMode');
+  m.classList.toggle('on', app); m.setAttribute('aria-pressed', app?'true':'false');
+  $('#cAppMode').hidden = !app; $('#cHint').hidden = app; $('#cAuto').hidden = app; if(app) $('#cLight').hidden = true;
   const a=$('#cAuto'); a.classList.toggle('on', settings.auto); a.setAttribute('aria-pressed', settings.auto?'true':'false');
   const sp = settings.split[state.dest]||0, b=$('#cSplit');
   b.textContent = sp===0 ? '見開き分割' : sp===1 ? '見開き：左→右' : '見開き：右→左';
   b.classList.toggle('on', sp>0); b.setAttribute('aria-pressed', sp>0?'true':'false');
 }
-$('#cShutter').onclick = ()=>{ if(!Cam.stream){ startCamera(); return; } Cam.stableSince=0; Cam.armed=false; Cam.capQuad=Cam.raw; capture(); };
+function openCamApp(){ const f=$('#fileCam'); f.value=''; f.click(); }
+$('#cAppShoot').onclick = openCamApp;
+$('#cMode').onclick = ()=>{ settings.camApp=!settings.camApp; saveSettings(); syncCamToggles();
+  if(settings.camApp){ stopCamera(); toast('Pixelのカメラアプリで撮ります（画質・ピント優先）'); } else { startCamera(); toast('この画面のカメラで撮ります（青い枠・自動撮影つき）'); } };
+$('#cShutter').onclick = ()=>{ if(settings.camApp){ openCamApp(); return; } if(!Cam.stream){ startCamera(); return; } Cam.stableSince=0; Cam.armed=false; Cam.capQuad=Cam.raw; capture(); };
 $('#cAuto').onclick = ()=>{ settings.auto=!settings.auto; saveSettings(); syncCamToggles(); Cam.armed=true; Cam.capQuad=null; toast(settings.auto?'止めて構えると自動で撮ります':'シャッターを押して撮ります'); };
 $('#cSplit').onclick = ()=>{ const v=((settings.split[state.dest]||0)+1)%3; settings.split[state.dest]=v; saveSettings(); syncCamToggles();
   toast(v===0?'見開きを分けずに1ページにします':v===1?'見開きを2ページに分けます（左ページが先）':'見開きを2ページに分けます（右ページが先・縦書きの本）'); };
@@ -1061,16 +1207,16 @@ $('#cBack').onclick = async()=>{
 $('#cThumb').onclick = ()=>{ renderReview(); show('review'); };
 $('#cSend').onclick = ()=>prepareSend();
 $('#cRetry').onclick = ()=>startCamera();
-$('#cCamApp').onclick = ()=>{ const f=$('#fileCam'); f.value=''; f.click(); };
+$('#cCamApp').onclick = openCamApp;
 $('#cGallery').onclick = ()=>{ const f=$('#fileGal'); f.value=''; f.click(); };
-async function importFiles(files){
+async function importFiles(files, kind){
   for(const f of files){
-    try{ const src = await loadFile(f); const page = newPage(null); state.pages.push(page); updateCamBar(); processSrc(page, src, null); }
+    try{ const src = await loadFile(f); const page = newPage(null); state.pages.push(page); updateCamBar(); processSrc(page, src, null, kind); }
     catch(e){ console.error(e); toast('読み込めない画像がありました'); }
   }
 }
-$('#fileCam').onchange = e=>importFiles([...(e.target.files||[])]);
-$('#fileGal').onchange = e=>importFiles([...(e.target.files||[])]);
+$('#fileCam').onchange = e=>importFiles([...(e.target.files||[])], 'カメラアプリ');
+$('#fileGal').onchange = e=>importFiles([...(e.target.files||[])], '画像');
 
 /* ======================= 撮ったページの一覧 ======================= */
 function renderReview(){
@@ -1186,7 +1332,7 @@ function openEdit(page,src,mode,found){
   syncEditTools();
   show('edit');
   const hint=$('#hint'); hint.style.opacity=1;
-  hint.textContent = found===false ? 'ふちが見つかりませんでした。角を指で動かしてください' : '青い枠を紙のふちに合わせてください。ふちの点で曲がりも直せます';
+  hint.textContent = (found===false ? 'ふちが見つかりませんでした。角を指で動かしてください' : page.marks ? '四すみの黒い四角に合わせました' : '青い枠を紙のふちに合わせてください。ふちの点で曲がりも直せます') + (page.srcInfo ? '（元：'+page.srcInfo+'）' : '');
   clearTimeout(openEdit._t); openEdit._t=setTimeout(()=>hint.style.opacity=0,4200);
   requestAnimationFrame(eLayout);
 }
