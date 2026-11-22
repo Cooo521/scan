@@ -108,6 +108,14 @@ button{font:inherit;color:inherit;border:0;background:none;cursor:pointer;paddin
 .tool.on{color:#6ea2ff}
 .filters{display:flex;gap:8px;padding:6px 12px;overflow-x:auto}
 
+/* ---------- 撮ってすぐの確認 ---------- */
+.kTabs{display:flex;gap:8px;justify-content:center;padding:0 14px 8px}
+.kStage{position:relative;flex:1;min-height:0;margin:0 14px;border-radius:14px;background:#000;display:flex;align-items:center;justify-content:center;overflow:hidden}
+.kStage img{max-width:100%;max-height:100%;object-fit:contain;display:block;background:#fff}
+.kStage canvas{width:100%;height:100%}
+.kWait{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;font-size:14px;background:#000}
+.kNote{margin:8px 16px 0;min-height:20px;text-align:center;font-size:13px;color:#a9afbb}
+.kFoot{padding-bottom:8px}
 /* ---------- ③ 送りました ---------- */
 .sentIn{width:100%;max-width:460px;margin:0 auto;flex:1;display:flex;flex-direction:column;gap:22px;padding:80px 20px 26px}
 .okCircle{width:88px;height:88px;border-radius:50%;background:#1d2b45;display:flex;align-items:center;justify-content:center;margin:0 auto}
@@ -221,6 +229,26 @@ button{font:inherit;color:inherit;border:0;background:none;cursor:pointer;paddin
       <span class="core"></span>
     </button>
     <button class="sendBtn" id="cSend" disabled><b>送る</b><small id="cSendN">0ページ</small></button>
+  </div>
+</section>
+
+<!-- 撮ってすぐの確認（カメラアプリで撮るモード） -->
+<section id="confirm" class="screen dark">
+  <div class="bar"><span style="width:64px"></span><div class="title" id="kTitle">確認</div><span style="width:64px"></span></div>
+  <div class="kTabs"><button class="btnPill on" id="kTabOut">仕上がり</button><button class="btnPill" id="kTabSrc">元の写真と枠</button></div>
+  <div class="kStage" id="kStage">
+    <img id="kImg" alt="切り抜いたページ">
+    <canvas id="kCanvas" hidden></canvas>
+    <div class="kWait" id="kWait"><div class="spin"></div><span>切り抜いています…</span></div>
+  </div>
+  <p class="kNote" id="kNote"></p>
+  <div class="foot kFoot">
+    <button id="kRetake">撮り直す</button>
+    <button id="kFix">枠を直す</button>
+  </div>
+  <div class="foot kFoot" style="padding-top:0">
+    <button id="kSend">OK・送る</button>
+    <button class="primary" id="kNext">OK・次を撮る</button>
   </div>
 </section>
 
@@ -911,7 +939,7 @@ function scaledData(src,size){ const s=Math.min(1,size/Math.max(src.width,src.he
   const c=mkCanvas(w,h), g=ctx2d(c); g.drawImage(src,0,0,w,h); return g.getImageData(0,0,w,h); }
 async function processJob(m){
   const sd=new ImageData(new Uint8ClampedArray(m.full),m.fw,m.fh);
-  let geom=m.geom, found=true, marks=false;
+  let geom=m.geom, found=m.geom?undefined:true, marks=m.geom?undefined:false;
   if(!geom){
     const r=detectData(new Uint8ClampedArray(m.sm),m.sw,m.sh,{flat:m.flat,profiles:!m.flat}), k=m.fw/m.sw;
     if(r.found){ geom={c:r.c.map(p=>({x:clamp(p.x*k,0,m.fw),y:clamp(p.y*k,0,m.fh)})),p:{}}; for(const e in r.p) geom.p[e]=r.p[e].map(v=>v*k); }
@@ -952,7 +980,7 @@ async function runProcess(src,o){
   const j=build(); return await processJob(j.m);
 }
 function applyResult(page,res){
-  page.geom=res.geom; page.marks=res.marks;
+  page.geom=res.geom; if(res.marks!==undefined) page.marks=res.marks; if(res.found!==undefined) page.found=res.found;
   for(const o of page.outs) URL.revokeObjectURL(o.turl);
   page.outs=res.outs.map(o=>({blob:o.blob,w:o.w,h:o.h,turl:URL.createObjectURL(o.tb)}));
   if(res.srcBlob) page.srcBlob=res.srcBlob;
@@ -1170,6 +1198,7 @@ function processSrc(page, src, liveQ, kind){
     applyResult(page, res);
     page.pending = false; updateCamBar();
     if($('#review').classList.contains('active')) renderReview();
+    onPageReady(page);
   });
 }
 function updateCamBar(){
@@ -1210,13 +1239,61 @@ $('#cRetry').onclick = ()=>startCamera();
 $('#cCamApp').onclick = openCamApp;
 $('#cGallery').onclick = ()=>{ const f=$('#fileGal'); f.value=''; f.click(); };
 async function importFiles(files, kind){
+  const confirmEach = kind==='カメラアプリ' && files.length===1;
   for(const f of files){
-    try{ const src = await loadFile(f); const page = newPage(null); state.pages.push(page); updateCamBar(); processSrc(page, src, null, kind); }
+    try{ const page = newPage(null); state.pages.push(page); updateCamBar(); if(confirmEach) openConfirm(page);
+      const src = await loadFile(f); processSrc(page, src, null, kind); }
     catch(e){ console.error(e); toast('読み込めない画像がありました'); }
   }
 }
 $('#fileCam').onchange = e=>importFiles([...(e.target.files||[])], 'カメラアプリ');
 $('#fileGal').onchange = e=>importFiles([...(e.target.files||[])], '画像');
+
+/* ======================= 撮ってすぐの確認 ======================= */
+const Confirm = { page:null, tab:'out', srcBmp:null, url:null };
+function openConfirm(page){
+  Confirm.page = page; Confirm.tab = 'out';
+  if(Confirm.srcBmp){ Confirm.srcBmp.close && Confirm.srcBmp.close(); Confirm.srcBmp = null; }
+  show('confirm'); renderConfirm();
+}
+function pageNumberOf(page){ let n=0; for(const p of state.pages){ if(p===page) return n+1; n+=Math.max(1,p.outs.length||1); } return n; }
+async function renderConfirm(){
+  const p = Confirm.page; if(!p) return;
+  $('#kTitle').textContent = pageNumberOf(p)+'ページ目を確認';
+  $('#kTabOut').classList.toggle('on', Confirm.tab==='out'); $('#kTabSrc').classList.toggle('on', Confirm.tab==='src');
+  const ready = !p.pending && p.outs.length;
+  $('#kWait').hidden = !!ready;
+  ['kFix','kNext','kSend'].forEach(id=>$('#'+id).disabled = !ready);
+  if(!ready){ $('#kImg').hidden = true; $('#kCanvas').hidden = true; $('#kNote').textContent = ''; return; }
+  $('#kNote').textContent = p.marks ? '四すみの黒い四角に合わせて切り抜きました'
+    : p.found===false ? 'ふちが見つからなかったので、写真全体を使いました。「枠を直す」で合わせられます'
+    : (p.outs.length>1 ? '見開きを2ページに分けました（1ページ目を表示）' : 'ずれていたら「枠を直す」で直せます');
+  if(Confirm.tab==='out'){
+    $('#kCanvas').hidden = true; const im=$('#kImg'); im.hidden = false;
+    const key=String(p.id)+':'+p.outs[0].turl;
+    if(im.dataset.for !== key){ if(Confirm.url) URL.revokeObjectURL(Confirm.url); Confirm.url = URL.createObjectURL(p.outs[0].blob); im.src = Confirm.url; im.dataset.for = key; }
+    return;
+  }
+  // 元の写真の上に、見つけた枠を描く
+  $('#kImg').hidden = true; const cvs=$('#kCanvas'); cvs.hidden = false;
+  if(!Confirm.srcBmp && p.srcBlob){ try{ Confirm.srcBmp = await createImageBitmap(p.srcBlob); }catch(e){ console.error(e); } }
+  const bmp = Confirm.srcBmp; if(!bmp) return;
+  const r = cvs.getBoundingClientRect(), dpr = window.devicePixelRatio||1;
+  cvs.width = Math.round(r.width*dpr); cvs.height = Math.round(r.height*dpr);
+  const g = cvs.getContext('2d'), sc = Math.min(cvs.width/bmp.width, cvs.height/bmp.height), ox=(cvs.width-bmp.width*sc)/2, oy=(cvs.height-bmp.height*sc)/2;
+  g.clearRect(0,0,cvs.width,cvs.height); g.imageSmoothingQuality='high'; g.drawImage(bmp,ox,oy,bmp.width*sc,bmp.height*sc);
+  const pts = outlinePts(p.geom).map(q=>({x:ox+q.x*sc, y:oy+q.y*sc}));
+  g.beginPath(); pts.forEach((q,i)=> i?g.lineTo(q.x,q.y):g.moveTo(q.x,q.y)); g.closePath();
+  g.fillStyle='rgba(79,140,255,0.16)'; g.fill(); g.lineWidth=3*dpr; g.lineJoin='round'; g.strokeStyle='#4f8cff'; g.stroke();
+}
+function onPageReady(page){ if(Confirm.page===page && $('#confirm').classList.contains('active')){ Confirm.srcBmp=null; renderConfirm(); } }
+$('#kTabOut').onclick = ()=>{ Confirm.tab='out'; renderConfirm(); };
+$('#kTabSrc').onclick = ()=>{ Confirm.tab='src'; renderConfirm(); };
+$('#kRetake').onclick = ()=>{ const p=Confirm.page; if(p){ for(const o of p.outs) URL.revokeObjectURL(o.turl); state.pages=state.pages.filter(x=>x!==p); }
+  Confirm.page=null; updateCamBar(); show('camera'); openCamApp(); };
+$('#kNext').onclick = ()=>{ Confirm.page=null; show('camera'); openCamApp(); };
+$('#kSend').onclick = ()=>{ Confirm.page=null; show('camera'); prepareSend(); };
+$('#kFix').onclick = ()=>{ const p=Confirm.page; if(p) openExisting(p,'confirm'); };
 
 /* ======================= 撮ったページの一覧 ======================= */
 function renderReview(){
@@ -1425,13 +1502,15 @@ $('#tFlat').onclick=async()=>{ const p=Edit.page.geom.p; for(const e in p) p[e]=
 $('#tRot').onclick=async()=>{ Edit.page.rot=(Edit.page.rot+1)%4; syncEditTools(); if(Edit.preview) await refreshPreview(); else toast('仕上がりを右に'+(Edit.page.rot*90)+'°回します'); };
 $('#tSplit').onclick=async()=>{ Edit.page.split=!Edit.page.split; Edit.page.rtl=(settings.split[state.dest]||0)===2; syncEditTools(); toast(Edit.page.split?'まん中の点線で2ページに分けます':'分けずに1ページにします'); if(Edit.preview) await refreshPreview(); else eDraw(); };
 document.querySelectorAll('#eFilters [data-f]').forEach(b=>b.onclick=async()=>{ Edit.page.filter=b.dataset.f; syncEditTools(); if(Edit.preview) await refreshPreview(); });
-function closeEdit(){ Edit.src=null; Edit.sd=null; Edit.disp=null; Edit.preview=null; Edit.page=null; renderReview(); updateCamBar(); show('review'); }
+function closeEdit(){ const back=Edit.back, page=Edit.page; Edit.src=null; Edit.sd=null; Edit.disp=null; Edit.preview=null; Edit.page=null; updateCamBar();
+  if(back==='confirm' && state.pages.indexOf(page)>=0){ openConfirm(page); return; } renderReview(); show('review'); }
 $('#eBack').onclick=()=>{ Object.assign(Edit.page,{geom:Edit.backup.geom,filter:Edit.backup.filter,rot:Edit.backup.rot,split:Edit.backup.split,rtl:Edit.backup.rtl}); closeEdit(); };
 $('#eSave').onclick=async()=>{ const page=Edit.page, src=Edit.src; await busy('補正しています…');
   try{ await finalizePage(page,editSD(),src); }catch(e){ console.error(e); toast('補正できませんでした'); } unbusy(); closeEdit(); };
 $('#eDelete').onclick=async()=>{ if(!await ask('このページを削除します。','削除')) return; const p=Edit.page; for(const o of p.outs) URL.revokeObjectURL(o.turl); state.pages=state.pages.filter(x=>x!==p);
   if(!state.pages.length){ Edit.src=null; Edit.sd=null; Edit.disp=null; Edit.page=null; updateCamBar(); show('camera'); return; } closeEdit(); };
-async function openExisting(page){
+async function openExisting(page, back){
+  Edit.back = back || 'review';
   if(page.pending||!page.srcBlob){ toast('まだ処理中です。少し待ってください'); return; }
   await busy('開いています…');
   try{ const c=await loadFile(page.srcBlob); unbusy(); openEdit(page,c,'edit'); } catch(e){ console.error(e); unbusy(); toast('開けませんでした'); }
