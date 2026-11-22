@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>カメラ確認</title>
+<style>
+  html,body{margin:0;height:100%;background:#000;color:#fff;font-family:system-ui,sans-serif}
+  video{position:fixed;inset:0;width:100%;height:100%;object-fit:cover}
+  #panel{position:fixed;left:0;right:0;bottom:0;padding:14px 16px 22px;background:rgba(0,0,0,.72);font-size:15px;line-height:1.6}
+  #msg{font-size:17px;font-weight:700;margin-bottom:6px}
+  #info{font-size:12px;color:#bbb;word-break:break-all}
+  button{margin-top:10px;margin-right:8px;padding:10px 14px;border:0;border-radius:10px;background:#4f8cff;color:#fff;font-size:14px}
+</style>
+</head>
+<body>
+<video id="v" autoplay playsinline muted></video>
+<div id="panel">
+  <div id="msg">カメラを起動しています…</div>
+  <div id="info"></div>
+  <button id="photo" hidden>高画質で撮れるか試す</button>
+  <label><button id="camApp">カメラアプリで撮る</button><input id="f" type="file" accept="image/*" capture="environment" hidden></label>
+</div>
+<script>
+const msg = document.getElementById('msg'), info = document.getElementById('info'), v = document.getElementById('v');
+const add = t => { info.innerHTML += t + '<br>'; };
+add('開き方: ' + location.protocol + ' / 安全な場所として扱われているか: ' + (window.isSecureContext ? 'はい' : 'いいえ'));
+let track = null;
+(async () => {
+  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) { msg.textContent = '❌ この開き方ではカメラの映像を使えません'; return; }
+  try {
+    const s = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment', width: { ideal: 3840 }, height: { ideal: 2160 } }, audio: false });
+    v.srcObject = s; track = s.getVideoTracks()[0];
+    await new Promise(r => v.onloadedmetadata = r);
+    msg.textContent = '✅ カメラが使えました！';
+    add('映像の大きさ: ' + v.videoWidth + ' × ' + v.videoHeight);
+    if ('ImageCapture' in window) document.getElementById('photo').hidden = false;
+  } catch (e) {
+    msg.textContent = '❌ カメラの映像を使えませんでした';
+    add('理由: ' + e.name + ' ' + e.message);
+  }
+})();
+document.getElementById('photo').onclick = async () => {
+  try { const b = await new ImageCapture(track).takePhoto(); const im = await createImageBitmap(b); add('高画質の写真: ' + im.width + ' × ' + im.height + '（OK）'); }
+  catch (e) { add('高画質の写真: 撮れませんでした ' + e.name); }
+};
+document.getElementById('camApp').onclick = () => document.getElementById('f').click();
+document.getElementById('f').onchange = async e => {
+  const file = e.target.files[0]; if (!file) return;
+  try { const im = await createImageBitmap(file); add('カメラアプリの写真: ' + im.width + ' × ' + im.height + '（OK）'); }
+  catch (err) { add('カメラアプリの写真: 読めませんでした'); }
+};
+</script>
+</body>
+</html>
