@@ -145,6 +145,16 @@ button{font:inherit;color:inherit;border:0;background:none;cursor:pointer;paddin
 .sheet .row{display:flex;gap:10px}
 .sheet .row button,.sheet>button{flex:1;min-height:52px;border-radius:14px;background:#2d313b;font-weight:700;font-size:15px}
 .sheet button.primary{background:#4f8cff}
+#driveWrap .sheet{max-height:90vh;overflow:auto}
+.dlist{display:flex;flex-direction:column;gap:8px}
+.drow{display:flex;align-items:center;gap:10px;background:#262a33;border-radius:12px;padding:10px 12px}
+.drow .dt{flex:1;min-width:0}
+.drow b{display:block;font-size:15px;color:#fff}
+.drow small{display:block;font-size:12px;color:#aab0bc;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.drow .st{display:block;font-size:12px;font-weight:700;color:#aab0bc;margin-top:2px}
+.drow.on .st{color:#6fd39a}
+.drow button{flex:none;min-height:44px;padding:0 14px;border-radius:12px;background:#4f8cff;font-weight:700;font-size:14px;color:#fff}
+.drow.on button{background:#2d313b}
 </style>
 </head>
 <body>
@@ -188,6 +198,7 @@ button{font:inherit;color:inherit;border:0;background:none;cursor:pointer;paddin
     </div>
 
     <div class="homeFoot"><svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#d14f74" stroke-width="2" stroke-linecap="round"><path d="M12 3v3M12 18v3M3 12h3M18 12h3M5.6 5.6l2.1 2.1M16.3 16.3l2.1 2.1M5.6 18.4l2.1-2.1M16.3 7.7l2.1-2.1"/></svg><span id="homeFootText">ボタンを押すとカメラが起動します</span></div>
+    <button id="driveBtn" hidden style="min-height:48px;border-radius:999px;background:#fff;color:#8a2d4b;font-weight:700;font-size:14px;border:2px solid #ffd9e2">ドライブのスキャンとつなぐ</button>
     <button id="setupBtn" hidden style="min-height:48px;border-radius:999px;background:#ffd9e2;color:#8a2d4b;font-weight:700;font-size:14px">最初の設定：設定リンクを貼り付ける</button>
   </div>
 </section>
@@ -313,6 +324,16 @@ button{font:inherit;color:inherit;border:0;background:none;cursor:pointer;paddin
     <p>前に送った「スマホ用の設定リンク」（https://cooo521.github.io/scan/#setup=… で始まるもの）を長押しでコピーして、下に貼り付けてください。</p>
     <textarea id="setupText" rows="4" style="width:100%;border-radius:12px;border:0;padding:10px;font:inherit;font-size:13px;background:#262a33;color:#fff;-webkit-user-select:text;user-select:text" placeholder="ここに貼り付け"></textarea>
     <div class="row"><button id="setupCancel">やめる</button><button class="primary" id="setupOk">設定する</button></div>
+  </div>
+</div>
+<div class="sheetWrap" id="driveWrap">
+  <div class="sheet">
+    <h3>ドライブのスキャンとつなぐ</h3>
+    <p>つないだボタンを押すと、ドライブのスキャン画面が開き、選んだフォルダにそのまま保存されます。つなぐのは1つにつき最初の1回だけです。</p>
+    <p style="font-size:13px">①「つなぐ」を押す　②許可の画面が出たら「常に許可する」にチェックして「作成」　③ドライブのフォルダ選びで、そのボタンの下に書いてあるフォルダを選ぶ</p>
+    <p id="driveNone" hidden style="color:#ffb4c2">このスマホのドライブのアプリに「ドライブ スキャン」が見つかりませんでした。ドライブのアプリを最新にしてから、もう一度開いてください。</p>
+    <div class="dlist" id="driveList"></div>
+    <button id="driveClose">とじる</button>
   </div>
 </div>
 <div class="sheetWrap" id="askWrap">
@@ -1005,9 +1026,13 @@ function stamp(){ const d=new Date(), z=v=>String(v).padStart(2,'0'); return d.g
 /* ======================= ① 送り先を選ぶ ======================= */
 // Androidアプリ（かんたんスキャン）の中で開いているとき
 const NATIVE = !!(window.Android && typeof window.Android.scan === 'function');
+// 新しいアプリ（ドライブのスキャンとつなげる版）か
+const NATIVE_DRIVE = NATIVE && typeof window.Android.driveScan === 'function';
+function nativeScan(dest){ toast('スキャナーを開いています…'); try{ window.Android.scan(dest||state.dest); }catch(e){ toast('スキャナーを開けませんでした'); } }
 document.querySelectorAll('[data-dest]').forEach(b=>b.onclick=()=>{
   state.dest = b.dataset.dest; clearBatch();
-  if(NATIVE){ toast('スキャナーを開いています…'); try{ window.Android.scan(state.dest); }catch(e){ toast('スキャナーを開けませんでした'); } return; }
+  if(NATIVE_DRIVE && Drive.st.connected[state.dest]){ toast('ドライブのスキャンを開いています…'); try{ window.Android.driveScan(state.dest); }catch(e){ nativeScan(); } return; }
+  if(NATIVE){ nativeScan(); return; }
   const d = DEST[state.dest];
   $('#cDest').textContent = '送り先：'+d.child+' › '+d.kind;
   $('#cDot').style.background = d.color;
@@ -1350,8 +1375,11 @@ async function testUpload(){
   syncHomeFoot();
 }
 function syncHomeFoot(){
-  $('#homeFootText').textContent = upload ? '送ると、選んだフォルダに直接入ります' : NATIVE ? 'ボタンを押すとスキャナーが開きます' : 'ボタンを押すとカメラが起動します';
-  $('#setupBtn').hidden = !(NATIVE && !upload);
+  const n = NATIVE_DRIVE ? driveCount() : 0, all = Object.keys(DEST).length;
+  $('#homeFootText').textContent = n===all ? 'ボタンを押すとドライブのスキャンが開きます' : upload ? '送ると、選んだフォルダに直接入ります' : NATIVE ? 'ボタンを押すとスキャナーが開きます' : 'ボタンを押すとカメラが起動します';
+  $('#setupBtn').hidden = !(NATIVE && !upload && n<all);
+  $('#driveBtn').hidden = !NATIVE_DRIVE;
+  if(NATIVE_DRIVE) $('#driveBtn').textContent = n===all ? 'ドライブのスキャンとのつながりを見る' : n===0 ? 'ドライブのスキャンとつなぐ（おすすめ）' : 'ドライブのスキャンとつなぐ（あと'+(all-n)+'個）';
 }
 function blobToB64(blob){ return new Promise((res,rej)=>{ const r=new FileReader(); r.onload=()=>res(String(r.result).split(',')[1]); r.onerror=()=>rej(r.error); r.readAsDataURL(blob); }); }
 
@@ -1367,6 +1395,52 @@ async function prepareSend(){
   if(upload){ await sendDirect(); return; }
   unbusy(); openShareSheet();
 }
+/* ---- ドライブのスキャンとつなぐ（アプリの中だけ） ---- */
+const Drive = { st:{provider:'', connected:{}} };
+function driveCount(){ return Object.keys(DEST).filter(k=>Drive.st.connected[k]).length; }
+function refreshDrive(){
+  if(!NATIVE_DRIVE) return;
+  try{ const j = JSON.parse(window.Android.driveStatus()); Drive.st = {provider:j.provider||'', connected:j.connected||{}}; }catch(e){ console.warn('driveStatus', e); }
+  syncHomeFoot(); renderDriveList();
+}
+function renderDriveList(){
+  const box = $('#driveList'); if(!box) return;
+  $('#driveNone').hidden = !!Drive.st.provider;
+  box.innerHTML = '';
+  for(const k of Object.keys(DEST)){
+    const d = DEST[k], on = !!Drive.st.connected[k];
+    const row = document.createElement('div'); row.className = 'drow'+(on?' on':'');
+    row.innerHTML = '<span class="dt"><b></b><small></small><span class="st"></span></span><button></button>';
+    row.querySelector('b').textContent = d.child+' › '+d.kind;
+    row.querySelector('small').textContent = d.parent+' / '+d.folder;
+    row.querySelector('.st').textContent = on ? '✓ つながっています' : 'まだつないでいません';
+    const btn = row.querySelector('button'); btn.textContent = on ? 'つなぎ直す' : 'つなぐ';
+    btn.disabled = !Drive.st.provider;
+    btn.onclick = ()=>{ toast('「'+d.folder+'」を選んでください'); try{ window.Android.driveConnect(k); }catch(e){ toast('つなげませんでした'); } };
+    box.appendChild(row);
+  }
+}
+window.onDriveConnected = (dest, msg)=>{
+  refreshDrive();
+  const d = DEST[dest], name = d ? d.child+'の'+d.kind : '';
+  const m = {
+    ok: name+'をつなぎました',
+    noconfig: name+'をつなぎましたが、フォルダを選ぶ画面が出ませんでした（マイドライブに入るかもしれません）',
+    noprovider: 'ドライブのアプリに「ドライブ スキャン」が見つかりませんでした',
+    denied: '許可されなかったので、つなげませんでした',
+    cancel: 'フォルダが選ばれなかったので、つなげませんでした',
+  }[msg] || 'つなげませんでした（'+msg+'）';
+  toast(m);
+};
+window.onDriveScan = async (dest, r)=>{
+  if(r==='opened') return;
+  if(r==='notconnected'){ refreshDrive(); nativeScan(dest); return; }
+  const why = r==='noopen' ? 'ドライブのスキャン画面が開きませんでした。' : 'ドライブのスキャンのボタンがまだ準備できていませんでした。';
+  if(await ask(why+'Googleのスキャナーで撮りますか？', 'Googleのスキャナーで撮る')) nativeScan(dest);
+};
+$('#driveBtn').onclick = ()=>{ refreshDrive(); $('#driveWrap').classList.add('on'); };
+$('#driveClose').onclick = ()=>$('#driveWrap').classList.remove('on');
+document.addEventListener('visibilitychange', ()=>{ if(!document.hidden) refreshDrive(); });
 window.onNativeScan = async (dest, pages)=>{
   await busy('受け取っています…');
   try{
@@ -1383,6 +1457,8 @@ window.onNativeScanError = msg=>toast('スキャナーでエラーが出まし�
 window.appBack = ()=>{
   if($('#sendWrap').classList.contains('on')){ $('#sendWrap').classList.remove('on'); return 'ok'; }
   if($('#setupWrap').classList.contains('on')){ $('#setupWrap').classList.remove('on'); return 'ok'; }
+  if($('#askWrap').classList.contains('on')){ $('#askNo').click(); return 'ok'; }
+  if($('#driveWrap').classList.contains('on')){ $('#driveWrap').classList.remove('on'); return 'ok'; }
   if($('#home').classList.contains('active')) return 'exit';
   if($('#camera').classList.contains('active')){ $('#cBack').click(); return 'ok'; }
   show('home'); return 'ok';
@@ -1559,7 +1635,7 @@ $('#setupBtn').onclick = ()=>{ $('#setupText').value=''; $('#setupWrap').classLi
 $('#setupCancel').onclick = ()=>$('#setupWrap').classList.remove('on');
 $('#setupOk').onclick = ()=>{ const m = $('#setupText').value.match(/#setup=([A-Za-z0-9_-]+)/); if(!m){ toast('設定リンクが見つかりませんでした'); return; }
   if(applySetup(m[1])){ $('#setupWrap').classList.remove('on'); syncHomeFoot(); } };
-syncHomeFoot();
+syncHomeFoot(); refreshDrive();
 // テスト用に中の処理を外から呼べるようにしておく
 window.Scan={detect,renderPage,buildPdf,loadFile,imageDataOf,state,settings,DEST,Cam};
 </script>
