@@ -135,7 +135,9 @@ class MainActivity : ComponentActivity() {
             insets
         }
         setContentView(web, ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
-        if (savedInstanceState != null) web.restoreState(savedInstanceState) else web.loadUrl(START_URL)
+        // 開くたびに最新の画面を読み込む（URLを毎回変えて、古い画面の保存分を使わないようにする）
+        if (savedInstanceState != null) web.restoreState(savedInstanceState)
+        else web.loadUrl(START_URL + "&t=" + System.currentTimeMillis())
 
         onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
             override fun handleOnBackPressed() {
@@ -376,7 +378,7 @@ class MainActivity : ComponentActivity() {
     /** 画面（ホームページ）から呼べる機能 */
     inner class Bridge {
         @JavascriptInterface
-        fun version(): String = "4"
+        fun version(): String = "5"
 
         @JavascriptInterface
         fun scan(dest: String) {

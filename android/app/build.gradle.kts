@@ -11,8 +11,8 @@ android {
         applicationId = "io.github.cooo521.kantanscan"
         minSdk = 26
         targetSdk = 35
-        versionCode = 4
-        versionName = "1.3"
+        versionCode = 5
+        versionName = "1.4"
     }
 
     // 署名の鍵：毎回同じ鍵を使う（組み立ての場所が KANTAN_KEYSTORE に鍵を用意する）
