@@ -50,7 +50,9 @@ class MainActivity : ComponentActivity() {
 
     private lateinit var web: WebView
     private var pendingDest: String? = null
+    private var pendingImage = false               // true: 丸付け用に写真（JPEG）を受け取る
     @Volatile private var lastPdfB64: String? = null
+    @Volatile private var lastImgB64: String? = null
 
     // ドライブのスキャンとつなぐ
     private val prefs by lazy { getSharedPreferences(PREFS, MODE_PRIVATE) }
@@ -65,8 +67,27 @@ class MainActivity : ComponentActivity() {
         registerForActivityResult(ActivityResultContracts.StartIntentSenderForResult()) { result ->
             val dest = pendingDest ?: ""
             pendingDest = null
+            val asImage = pendingImage
+            pendingImage = false
             if (result.resultCode != RESULT_OK) {
                 js("window.onNativeScanCancel && window.onNativeScanCancel()")
+                return@registerForActivityResult
+            }
+            if (asImage) {
+                val page = GmsDocumentScanningResult.fromActivityResultIntent(result.data)?.pages?.firstOrNull()
+                if (page == null) {
+                    js("window.onNativeScanError && window.onNativeScanError('noimage')")
+                    return@registerForActivityResult
+                }
+                Thread {
+                    try {
+                        val bytes = contentResolver.openInputStream(page.imageUri)!!.use { it.readBytes() }
+                        lastImgB64 = Base64.encodeToString(bytes, Base64.NO_WRAP)
+                        runOnUiThread { jsCall("onNativeImage", dest) }
+                    } catch (e: Exception) {
+                        runOnUiThread { js("window.onNativeScanError && window.onNativeScanError(${JSONObject.quote(e.message ?: "read")})") }
+                    }
+                }.start()
                 return@registerForActivityResult
             }
             val pdf = GmsDocumentScanningResult.fromActivityResultIntent(result.data)?.pdf
@@ -142,16 +163,20 @@ class MainActivity : ComponentActivity() {
 
     // ---------------- Google のドキュメントスキャナー（予備） ----------------
 
-    private fun startScan(dest: String) {
-        val options = GmsDocumentScannerOptions.Builder()
+    private fun startScan(dest: String, asImage: Boolean = false) {
+        val b = GmsDocumentScannerOptions.Builder()
             .setGalleryImportAllowed(true)
-            .setResultFormats(GmsDocumentScannerOptions.RESULT_FORMAT_PDF)
             .setScannerMode(GmsDocumentScannerOptions.SCANNER_MODE_FULL)
-            .build()
-        GmsDocumentScanning.getClient(options)
+        if (asImage) {
+            b.setResultFormats(GmsDocumentScannerOptions.RESULT_FORMAT_JPEG).setPageLimit(1)
+        } else {
+            b.setResultFormats(GmsDocumentScannerOptions.RESULT_FORMAT_PDF)
+        }
+        GmsDocumentScanning.getClient(b.build())
             .getStartScanIntent(this)
             .addOnSuccessListener { sender ->
                 pendingDest = dest
+                pendingImage = asImage
                 scanLauncher.launch(IntentSenderRequest.Builder(sender).build())
             }
             .addOnFailureListener { e ->
@@ -351,11 +376,25 @@ class MainActivity : ComponentActivity() {
     /** 画面（ホームページ）から呼べる機能 */
     inner class Bridge {
         @JavascriptInterface
-        fun version(): String = "3"
+        fun version(): String = "4"
 
         @JavascriptInterface
         fun scan(dest: String) {
             runOnUiThread { startScan(dest) }
+        }
+
+        /** 丸付け用：Googleのスキャナーで1枚撮って、写真（JPEG）で受け取る */
+        @JavascriptInterface
+        fun scanImage(tag: String) {
+            runOnUiThread { startScan(tag, asImage = true) }
+        }
+
+        /** 直前に撮った写真（base64）を1回だけ渡す */
+        @JavascriptInterface
+        fun takeImage(): String {
+            val s = lastImgB64 ?: ""
+            lastImgB64 = null
+            return s
         }
 
         /** 直前にスキャンしたPDF（base64）を1回だけ渡す */

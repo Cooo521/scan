@@ -7,7 +7,7 @@
 <title>かんたんスキャン</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Zen+Maru+Gothic:wght@500;700&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Zen+Maru+Gothic:wght@500;700&family=Klee+One:wght@600&display=swap" rel="stylesheet">
 <style>
 *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
 [hidden]{display:none !important}
@@ -146,6 +146,64 @@ button{font:inherit;color:inherit;border:0;background:none;cursor:pointer;paddin
 .sheet .row button,.sheet>button{flex:1;min-height:52px;border-radius:14px;background:#2d313b;font-weight:700;font-size:15px}
 .sheet button.primary{background:#4f8cff}
 #driveWrap .sheet{max-height:90vh;overflow:auto}
+/* ---------- 丸付け ---------- */
+button.mark{width:100%;text-align:left;background:#ffeef2;color:#6b3a4a;box-shadow:0 3px 0 #f6c9d5}
+button.mark .ic{background:#ffd9e2}
+button.mark b{color:#8a2d4b}
+button.mark small{color:#8a5566}
+button.mark .badge{color:#b23a62}
+#maru{overflow:hidden}
+.mHead{display:flex;align-items:center;gap:6px;padding:10px 12px 6px}
+.mHead h1{margin:0;font-size:19px;font-weight:700}
+.iconBtn{width:44px;height:44px;border-radius:12px;display:flex;align-items:center;justify-content:center;flex:0 0 auto}
+.mScore{margin-left:auto;display:flex;align-items:center;gap:6px;background:#3a1d1f;color:#ffb4b0;border-radius:999px;padding:6px 12px;font-size:14px;font-weight:700;white-space:nowrap}
+.mTabs{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:4px;background:#1b1e25;border-radius:14px;padding:4px;margin:4px 14px 8px}
+.mTabs button{min-height:40px;border-radius:10px;font-size:15px;font-weight:700;color:#c9ced8}
+.mTabs button[aria-selected=true]{background:#f2f3f5;color:#0f1115}
+.mBody{flex:1;overflow:auto;padding:0 14px 10px}
+.mScroll{overflow-x:auto;border-radius:6px}
+.mPaper{position:relative;width:100%;background:#fff;border-radius:6px;box-shadow:0 6px 24px rgba(0,0,0,.45);overflow:hidden}
+.mPaper.zoom{width:200%}
+.mPaper img{display:block;width:100%;height:auto}
+.mPaper svg{position:absolute;inset:0;width:100%;height:100%}
+.mPaper svg .hit{cursor:pointer}
+.mWait{position:absolute;inset:0;background:rgba(15,17,21,.62);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;color:#fff;font-size:15px;font-weight:700;text-align:center;padding:20px}
+.mWait .spin{width:40px;height:40px;border-width:4px}
+.mWait small{font-size:12.5px;font-weight:500;color:#dfe2e8}
+.mTools{display:flex;justify-content:space-between;align-items:center;gap:8px;margin:10px 0 0}
+.mHint{margin:0;font-size:12.5px;line-height:1.6;color:#a9afbb}
+.mErr{margin-top:12px;background:#2a1c1d;border-radius:14px;padding:12px 14px;display:flex;flex-direction:column;gap:10px}
+.mErr p{margin:0;font-size:14px;line-height:1.7;color:#ffd6d3}
+.mErr .row{display:flex;gap:8px}
+.mErr button{flex:1;min-height:46px;border-radius:12px;background:#3a2a2c;font-weight:700;font-size:14px}
+.mSum{margin:2px 0 10px;font-size:13px;line-height:1.6;color:#a9afbb}
+.mList{display:flex;flex-direction:column;gap:10px}
+.mCard{background:#1b1e25;border-radius:16px;padding:12px 14px;display:flex;flex-direction:column;gap:8px}
+.mCard.ng{border:1.5px solid #5a2a2c}
+.mCard.check{border:1.5px solid #5a4520}
+.mCard .hd{display:flex;align-items:center;gap:10px}
+.mCard h2{margin:0;font-size:15px;font-weight:700;line-height:1.4;flex:1;min-width:0}
+.mCard .ans{font-size:15px;font-weight:700;white-space:nowrap}
+.mCard .lab{font-size:12.5px;font-weight:700;white-space:nowrap}
+.mCard .two{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
+.mCard .two div{background:#262a33;border-radius:10px;padding:8px 10px;display:flex;flex-direction:column;gap:2px;min-width:0}
+.mCard .two div.right{background:#3a1d1f}
+.mCard .two span{font-size:11.5px;color:#a9afbb}
+.mCard .two div.right span{color:#ffb4b0}
+.mCard .two b{font-size:16px;word-break:break-word}
+.mCard .two div.right b{color:#ff8a84}
+.mCard .two div.right.chk{background:#33291a}
+.mCard .two div.right.chk span{color:#ffe2b0}
+.mCard .two div.right.chk b{color:#ffb547}
+.mCard p{margin:0;font-size:13.5px;line-height:1.75;color:#dfe2e8;white-space:pre-line}
+.mCard .pt{background:#262a33;border-radius:10px;padding:8px 10px;font-size:13px;color:#f2f3f5}
+.mCard .warn{background:#33291a;border-radius:10px;padding:8px 10px;font-size:13px;color:#ffe2b0}
+.mBar{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;padding:8px 14px 16px}
+.mBar button{min-height:52px;border-radius:14px;background:#262a33;font-weight:700;font-size:15px}
+.mBar button.primary{background:#4f8cff;color:#fff}
+#keyWrap input{width:100%;box-sizing:border-box;min-height:48px;border-radius:12px;border:0;padding:10px 12px;font:inherit;font-size:14px;background:#262a33;color:#fff;-webkit-user-select:text;user-select:text}
+#keyWrap a.open{min-height:48px;border-radius:14px;background:#2d313b;color:#fff;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:15px;text-decoration:none}
+
 .dlist{display:flex;flex-direction:column;gap:8px}
 .drow{display:flex;align-items:center;gap:10px;background:#262a33;border-radius:12px;padding:10px 12px}
 .drow .dt{flex:1;min-width:0}
@@ -191,11 +249,11 @@ button{font:inherit;color:inherit;border:0;background:none;cursor:pointer;paddin
       </div>
     </section>
 
-    <div class="mark" aria-disabled="true">
-      <span class="ic"><svg aria-hidden="true" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#8a6a55" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="8"/><path d="m8.5 12 2.5 2.5 4.5-5"/></svg></span>
-      <div><b>丸付け</b><small>あとで追加します</small></div>
-      <span class="badge">じゅんび中</span>
-    </div>
+    <button class="mark" id="maruBtn">
+      <span class="ic"><svg aria-hidden="true" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#d14f74" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="8"/><path d="m8.5 12 2.5 2.5 4.5-5"/></svg></span>
+      <div><b>丸付け</b><small>撮ると、AIが〇×と答えをつけます</small></div>
+      <span class="badge">AI</span>
+    </button>
 
     <div class="homeFoot"><svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#d14f74" stroke-width="2" stroke-linecap="round"><path d="M12 3v3M12 18v3M3 12h3M18 12h3M5.6 5.6l2.1 2.1M16.3 16.3l2.1 2.1M5.6 18.4l2.1-2.1M16.3 7.7l2.1-2.1"/></svg><span id="homeFootText">ボタンを押すとカメラが起動します</span></div>
     <button id="driveBtn" hidden style="min-height:48px;border-radius:999px;background:#fff;color:#8a2d4b;font-weight:700;font-size:14px;border:2px solid #ffd9e2">ドライブのスキャンとつなぐ</button>
@@ -309,6 +367,31 @@ button{font:inherit;color:inherit;border:0;background:none;cursor:pointer;paddin
   </div>
 </section>
 
+<!-- 丸付け -->
+<section id="maru" class="screen dark">
+  <div class="mHead">
+    <button class="iconBtn" id="mBack" aria-label="もどる"><svg aria-hidden="true" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#f2f3f5" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m15 5-7 7 7 7"/></svg></button>
+    <h1>丸付け</h1>
+    <span class="mScore" id="mScore" hidden></span>
+    <button class="iconBtn" id="mSet" aria-label="AIの設定" style="margin-left:auto"><svg aria-hidden="true" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#c9ced8" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg></button>
+  </div>
+  <div class="mTabs" role="tablist" aria-label="表示の切りかえ">
+    <button role="tab" id="mTabImg" aria-selected="true">画像</button>
+    <button role="tab" id="mTabExp" aria-selected="false">解説</button>
+  </div>
+  <div class="mBody" id="mBody">
+    <div id="mImgPane">
+      <div class="mScroll"><div class="mPaper" id="mPaper"><img id="mImg" alt="撮ったプリント"><svg id="mSvg" aria-label="丸付けの結果"></svg>
+        <div class="mWait" id="mWait"><div class="spin"></div><div id="mWaitMsg">丸付け中…</div><small id="mWaitSub">AIが2回解いて、答えをくらべています（20〜40秒）</small></div>
+      </div></div>
+      <div class="mErr" id="mErr" hidden><p id="mErrMsg"></p><div class="row"><button id="mErrKey" hidden>キーを設定し直す</button><button id="mRetry">もう一度</button></div></div>
+      <div class="mTools"><p class="mHint" id="mHint">AIの丸付けです。〇×を押すと切りかえられます。</p><button class="btnPill" id="mZoom">拡大</button></div>
+    </div>
+    <div id="mExpPane" hidden><p class="mSum" id="mSum"></p><div class="mList" id="mList"></div></div>
+  </div>
+  <div class="mBar"><button id="mHome">ホームへ</button><button class="primary" id="mAgain">もう1枚 丸付け</button></div>
+</section>
+
 <!-- 送る前の確認 -->
 <div class="sheetWrap" id="sendWrap">
   <div class="sheet">
@@ -337,6 +420,17 @@ button{font:inherit;color:inherit;border:0;background:none;cursor:pointer;paddin
     <button id="driveClose">とじる</button>
   </div>
 </div>
+<div class="sheetWrap" id="keyWrap">
+  <div class="sheet">
+    <h3>丸付けの準備（最初の1回だけ）</h3>
+    <p>丸付けにはGoogleのAI（Gemini）を無料で使います。無料のAPIキーを作って、下に貼り付けてください。カードの登録はいりません。</p>
+    <p style="font-size:13px">①「キーを作るページを開く」→ Googleでログイン　②「APIキーを作成」→ できたキー（AIza で始まる文字）をコピー　③ この画面にもどって貼り付け、「設定する」</p>
+    <a class="open" href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">キーを作るページを開く</a>
+    <input id="keyText" type="text" inputmode="url" autocomplete="off" spellcheck="false" placeholder="AIza…" aria-label="APIキー">
+    <p id="keyNow" style="font-size:12px;color:#a9afbb" hidden></p>
+    <div class="row"><button id="keyCancel">やめる</button><button class="primary" id="keyOk">設定する</button></div>
+  </div>
+</div>
 <div class="sheetWrap" id="askWrap">
   <div class="sheet">
     <p id="askMsg" style="color:#f2f3f5;font-size:15px"></p>
@@ -347,6 +441,7 @@ button{font:inherit;color:inherit;border:0;background:none;cursor:pointer;paddin
 <div id="toast"></div>
 <input type="file" id="fileCam" accept="image/*" capture="environment" style="display:none">
 <input type="file" id="fileGal" accept="image/*" multiple style="display:none">
+<input type="file" id="fileMaru" accept="image/*" capture="environment" style="display:none">
 
 <script>
 'use strict';
@@ -1462,6 +1557,8 @@ window.appBack = ()=>{
   if($('#sendWrap').classList.contains('on')){ $('#sendWrap').classList.remove('on'); return 'ok'; }
   if($('#setupWrap').classList.contains('on')){ $('#setupWrap').classList.remove('on'); return 'ok'; }
   if($('#askWrap').classList.contains('on')){ $('#askNo').click(); return 'ok'; }
+  if($('#keyWrap').classList.contains('on')){ $('#keyWrap').classList.remove('on'); return 'ok'; }
+  if($('#maru').classList.contains('active')){ maruLeave(); return 'ok'; }
   if($('#driveWrap').classList.contains('on')){ $('#driveWrap').classList.remove('on'); return 'ok'; }
   if($('#home').classList.contains('active')) return 'exit';
   if($('#camera').classList.contains('active')){ $('#cBack').click(); return 'ok'; }
@@ -1635,6 +1732,326 @@ async function openExisting(page, back){
   try{ const c=await loadFile(page.srcBlob); unbusy(); openEdit(page,c,'edit'); } catch(e){ console.error(e); unbusy(); toast('開けませんでした'); }
 }
 
+/* ======================= 丸付け（AI：Gemini 無料枠） ======================= */
+// キーはこのスマホの中だけに保存します（ホームページには置きません）
+const AI_API = 'https://generativelanguage.googleapis.com/v1beta/';
+const NATIVE_IMG = NATIVE && typeof window.Android.scanImage === 'function';
+const Maru = { blob:null, url:null, b64:'', W:0, H:0, items:[], run:0, title:'', afterKey:false };
+function aiKey(){ try{ const o = JSON.parse(localStorage.getItem('kscan.ai')||'null'); return o && o.k ? o : null; }catch(e){ return null; } }
+function saveAiKey(o){ try{ localStorage.setItem('kscan.ai', JSON.stringify(o)); }catch(e){} }
+
+$('#maruBtn').onclick = ()=>{ if(!aiKey()){ openKeySheet(true); return; } maruShoot(); };
+function maruShoot(){
+  if(NATIVE_IMG){ toast('スキャナーを開いています…'); try{ window.Android.scanImage('maru'); }catch(e){ toast('スキャナーを開けませんでした'); } return; }
+  if(NATIVE){ toast('丸付けを使うには、アプリを新しくしてください'); return; }
+  const f = $('#fileMaru'); f.value=''; f.click();
+}
+window.onNativeImage = ()=>{
+  let b64=''; try{ b64 = window.Android.takeImage(); }catch(e){}
+  if(!b64){ toast('写真を受け取れませんでした'); return; }
+  const bin = atob(b64), u8 = new Uint8Array(bin.length); for(let i=0;i<bin.length;i++) u8[i]=bin.charCodeAt(i);
+  maruStart(new Blob([u8], {type:'image/jpeg'}));
+};
+$('#fileMaru').onchange = e=>{ const f = e.target.files && e.target.files[0]; if(f) maruStart(f); };
+
+async function maruStart(file){
+  const run = ++Maru.run;
+  show('maru'); maruTab('img'); $('#mPaper').classList.remove('zoom'); $('#mZoom').textContent='拡大';
+  Maru.items=[]; Maru.title=''; drawMarks(); renderExplain(); setScore();
+  $('#mErr').hidden = true; $('#mWait').hidden = false; $('#mWaitMsg').textContent='写真を準備しています…';
+  try{
+    // 長い辺 2048px の JPEG にして送る（手書きが読める大きさ）
+    const bmp = await createImageBitmap(file, {imageOrientation:'from-image'}).catch(()=>createImageBitmap(file));
+    const s = Math.min(1, 2048/Math.max(bmp.width, bmp.height)), W = Math.round(bmp.width*s), H = Math.round(bmp.height*s);
+    const c = document.createElement('canvas'); c.width=W; c.height=H; const g = c.getContext('2d'); g.fillStyle='#fff'; g.fillRect(0,0,W,H); g.drawImage(bmp,0,0,W,H);
+    const blob = await new Promise(r=>c.toBlob(r,'image/jpeg',0.9));
+    if(Maru.url) URL.revokeObjectURL(Maru.url);
+    Maru.blob = blob; Maru.url = URL.createObjectURL(blob); Maru.W = W; Maru.H = H;
+    Maru.b64 = await blobToB64(blob);
+    $('#mImg').src = Maru.url; $('#mSvg').setAttribute('viewBox', '0 0 '+W+' '+H);
+  }catch(e){ console.error(e); if(run===Maru.run) maruError('写真を読み込めませんでした。', false); return; }
+  if(run===Maru.run) maruGrade(run);
+}
+function maruLeave(){ Maru.run++; show('home'); }
+$('#mBack').onclick = maruLeave; $('#mHome').onclick = maruLeave;
+$('#mAgain').onclick = ()=>maruShoot();
+$('#mRetry').onclick = ()=>{ if(Maru.b64) maruGrade(++Maru.run); else maruShoot(); };
+$('#mErrKey').onclick = ()=>openKeySheet(false);
+$('#mSet').onclick = ()=>openKeySheet(false);
+$('#mZoom').onclick = ()=>{ const z = $('#mPaper').classList.toggle('zoom'); $('#mZoom').textContent = z ? 'もとにもどす' : '拡大'; };
+$('#mTabImg').onclick = ()=>maruTab('img'); $('#mTabExp').onclick = ()=>maruTab('exp');
+function maruTab(t){
+  $('#mTabImg').setAttribute('aria-selected', t==='img'); $('#mTabExp').setAttribute('aria-selected', t==='exp');
+  $('#mImgPane').hidden = t!=='img'; $('#mExpPane').hidden = t!=='exp'; $('#mBody').scrollTop = 0;
+}
+function maruError(msg, keyBtn){ $('#mWait').hidden = true; $('#mErr').hidden = false; $('#mErrMsg').textContent = msg; $('#mErrKey').hidden = !keyBtn; }
+
+/* ---- AI への問い合わせ ---- */
+const MARU_PROMPT = `あなたは小学生・中学受験生のプリントを丸付けする、ていねいなベテランの先生です。
+写真のプリントを、次の手順で丸付けしてください。
+
+1. 解答らん（答えを書く場所）がある小問を、上から順にすべて見つける。番号はプリントの表記どおりに書く（例：「1(2)」「問3」）。
+2. 問題文と図をよく読み、自分でていねいに解いて正しい答えを出す。計算は必ず検算する。
+3. 子どもが書いた答え（手書き）を読み取る。空欄なら「（空欄）」、読めなければ「（読めない）」と書く。
+4. 子どもの答えが正しいか判定する。同じ値の別の書き方（19/12 と 1と7/12、0.5 と 1/2 など）は正解。単位や答え方の指示（「記号で」「漢字で」など）に合っていなければ不正解。
+5. 位置：answer_box は子どもが答えを書いた場所（空欄なら解答らん）を囲む四角。free_box はその問題の近くで、文字も線も何もない空いている場所（正しい答えを赤字で書きこむ場所）を囲む四角。どちらも [ymin, xmin, ymax, xmax] で、画像の左上を0、右下を1000とした整数。
+
+出力はJSONだけにする：
+{"title":"プリントの題名（わからなければ空文字）","questions":[{"no":"1(2)","question":"問題の要約（25字以内）","student_answer":"子どもの答え","correct_answer":"正しい答え（短く。式は書かない）","is_correct":true,"answer_box":[0,0,0,0],"free_box":[0,0,0,0],"explanation":"小学生にわかる解き方（2〜4行。行の区切りは\\n）","point":"不正解のときだけ：どこでまちがえたか・気をつけること（1〜2行）。正解なら空文字"}]}
+問題が見つからない・読めない写真のときは {"questions":[],"message":"理由"} とする。`;
+const MARU_PROMPT_2 = MARU_PROMPT + '\n\n（この回は、ちがう解き方でも検算してから答えを決めること）';
+
+// 新しい設定が通らないモデルのために、だんだん簡単な設定にして試す
+const AI_CONFIGS = [
+  {responseMimeType:'application/json', mediaResolution:'MEDIA_RESOLUTION_HIGH', thinkingConfig:{thinkingLevel:'high'}},
+  {responseMimeType:'application/json', thinkingConfig:{thinkingLevel:'high'}},
+  {responseMimeType:'application/json', thinkingConfig:{thinkingBudget:-1}},
+  {responseMimeType:'application/json'},
+];
+function aiErr(status, text, model){ const e = new Error('ai '+status); e.status = status; e.text = String(text||''); e.model = model; return e; }
+function noQuota(e){ return e.status===429 && /limit:\s*0\b/i.test(e.text); }   // 無料枠では使えないモデル
+async function aiPost(k, model, body){
+  let res;
+  try{ res = await fetch(AI_API+'models/'+encodeURIComponent(model)+':generateContent?key='+encodeURIComponent(k), {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)}); }
+  catch(e){ throw aiErr(0, String(e), model); }
+  if(res.ok) return res.json();
+  throw aiErr(res.status, await res.text().catch(()=>''), model);
+}
+async function aiGenerate(parts){
+  const key = aiKey(); if(!key) throw aiErr(-1, 'nokey');
+  const models = (key.models && key.models.length) ? key.models.slice() : [key.model];
+  let last = null;
+  for(const model of models){
+    for(let ci = (key.cfg && key.model===model ? key.cfg : 0); ci < AI_CONFIGS.length; ci++){
+      try{
+        const j = await aiPost(key.k, model, {contents:[{role:'user', parts}], generationConfig:AI_CONFIGS[ci]});
+        if(key.model!==model || key.cfg!==ci){ key.model = model; key.cfg = ci; key.models = models.slice(models.indexOf(model)); saveAiKey(key); }
+        return j;
+      }catch(e){
+        last = e;
+        if(e.status===400 && ci < AI_CONFIGS.length-1 && !/API key|API_KEY/i.test(e.text)) continue;   // 設定を簡単にしてもう一度
+        break;
+      }
+    }
+    // このモデルが使えない（無料枠なし・見つからない）ときだけ、次のモデルへ
+    if(last && (last.status===404 || last.status===403 && !/API key/i.test(last.text) || noQuota(last))) continue;
+    break;
+  }
+  throw last || aiErr(0, 'none');
+}
+function aiText(j){
+  const parts = (((j||{}).candidates||[])[0]||{}).content; const ps = (parts && parts.parts) || [];
+  return ps.filter(p=>!p.thought && typeof p.text==='string').map(p=>p.text).join('');
+}
+function parseJsonLoose(t){
+  t = String(t||'').replace(/^\s*```(?:json)?/i,'').replace(/```\s*$/,'');
+  const a = t.indexOf('{'), b = t.lastIndexOf('}'); if(a<0 || b<a) throw new Error('nojson');
+  return JSON.parse(t.slice(a, b+1));
+}
+async function gradeOnce(prompt){
+  const j = await aiGenerate([{inlineData:{mimeType:'image/jpeg', data:Maru.b64}}, {text:prompt}]);
+  const o = parseJsonLoose(aiText(j));
+  if(!o || !Array.isArray(o.questions)) throw new Error('badjson');
+  return o;
+}
+
+/* ---- 2回の答えをくらべる ---- */
+function normNo(s){ return String(s||'').normalize('NFKC').replace(/[\s()（）\[\]【】「」問第番.,、。]/g,'').toLowerCase(); }
+function numVal(s){
+  const t = String(s||'').normalize('NFKC').replace(/\s+/g,'').replace(/,/g,'');
+  const m = t.match(/^(-?\d+(?:\.\d+)?)(?:(と|\+)(\d+)\/(\d+)|\/(\d+(?:\.\d+)?))?([^\d]*)$/);
+  if(!m) return null;
+  let v = +m[1];
+  if(m[2]) v = (v<0?-1:1)*(Math.abs(v) + (+m[3])/(+m[4])); else if(m[5]) v = v/(+m[5]);
+  return {v, u:m[6]||''};
+}
+function sameAnswer(a, b){
+  const x = numVal(a), y = numVal(b);
+  if(!x || !y) return true;                      // 数でないものは、言い回しのちがいがあるのでくらべない
+  return Math.abs(x.v-y.v) < 1e-9*Math.max(1,Math.abs(x.v)) && (x.u===y.u || !x.u || !y.u);
+}
+function sameAnswerText(a, b){ return String(a||'').normalize('NFKC').replace(/\s+/g,'') === String(b||'').normalize('NFKC').replace(/\s+/g,'') || (numVal(a) && numVal(b) && sameAnswer(a, b)); }
+function mergeRuns(a, b){
+  const qa = a.questions||[], qb = b ? (b.questions||[]) : [];
+  const byNo = new Map(qb.map(q=>[normNo(q.no), q]));
+  return qa.map((q,i)=>{
+    const o = Object.assign({}, q); o.is_correct = !!q.is_correct; o.status = o.is_correct ? 'ok' : 'ng';
+    const r = byNo.get(normNo(q.no)) || (qb.length===qa.length ? qb[i] : null);
+    if(r && (!!r.is_correct !== o.is_correct || !sameAnswer(q.correct_answer, r.correct_answer))){
+      o.status = 'check'; o.alt = {answer:r.correct_answer, ok:!!r.is_correct, explanation:r.explanation||''};
+    }
+    o.orig = o.status;
+    return o;
+  });
+}
+
+async function maruGrade(run){
+  $('#mErr').hidden = true; $('#mWait').hidden = false; $('#mWaitMsg').textContent = '丸付け中…'; $('#mWaitSub').textContent = 'AIが2回解いて、答えをくらべています（20〜40秒）';
+  Maru.items = []; drawMarks(); renderExplain(); setScore();
+  let done = 0; const tick = ()=>{ done++; if(run===Maru.run) $('#mWaitMsg').textContent = '丸付け中…（'+done+'/2）'; };
+  const p1 = gradeOnce(MARU_PROMPT).then(r=>{ tick(); return r; });
+  const p2 = new Promise(r=>setTimeout(r, 600)).then(()=>gradeOnce(MARU_PROMPT_2)).then(r=>{ tick(); return r; });
+  const [r1, r2] = await Promise.allSettled([p1, p2]);
+  if(run !== Maru.run) return;
+  if(r1.status==='rejected' && r2.status==='rejected'){ console.warn('grade', r1.reason, r2.reason); showAiError(r1.reason); return; }
+  const a = r1.status==='fulfilled' ? r1.value : r2.value, b = (r1.status==='fulfilled' && r2.status==='fulfilled') ? r2.value : null;
+  Maru.items = mergeRuns(a, b); Maru.title = a.title || '';
+  $('#mWait').hidden = true;
+  if(!Maru.items.length){ maruError('問題が見つかりませんでした。'+(a.message ? '（'+a.message+'）' : '')+'プリント全体がはっきり写るように撮り直してください。', false); }
+  if(!b && Maru.items.length) toast('今回はAIが1回分しか答えられなかったので、答えくらべはしていません');
+  drawMarks(); renderExplain(); setScore();
+}
+function showAiError(e){
+  const s = e && e.status;
+  if(s===-1){ openKeySheet(false); maruError('丸付けの準備（APIキー）がまだです。', true); return; }
+  if(s===400 && /API key|API_KEY/i.test(e.text||'')){ maruError('APIキーが正しくないようです。キーを設定し直してください。', true); return; }
+  if(s===403){ maruError('このキーではAIを使えませんでした。キーを作り直して、設定し直してください。', true); return; }
+  if(s===429){ maruError('AIを使える回数の上限になりました（無料の分）。少し時間をおいて「もう一度」を押してください。', false); return; }
+  if(s===0){ maruError('AIにつながりませんでした。電波を確かめて「もう一度」を押してください。', false); return; }
+  if(s>=500){ maruError('AIが混んでいるようです。少しおいて「もう一度」を押してください。', false); return; }
+  maruError('AIの答えをうまく読み取れませんでした。「もう一度」を押してください。', false);
+}
+
+/* ---- 画像の上に 〇×と答えをかく ---- */
+const RED = '#e0322b', AMBER = '#c26a00';
+function validBox(b){ return Array.isArray(b) && b.length===4 && b.every(v=>typeof v==='number' && isFinite(v)) && b[2]>b[0] && b[3]>b[1] && b[0]>=0 && b[1]>=0 && b[2]<=1000 && b[3]<=1000; }
+function svgEl(tag, attrs, text){ const e = document.createElementNS('http://www.w3.org/2000/svg', tag); for(const k in attrs) e.setAttribute(k, attrs[k]); if(text!=null) e.textContent = text; return e; }
+function textWidth(t, fs){ let w = 0; for(const ch of String(t)) w += /[\x20-\x7e]/.test(ch) ? 0.6 : 1.0; return w*fs; }
+function drawMarks(){
+  const svg = $('#mSvg'); while(svg.firstChild) svg.removeChild(svg.firstChild);
+  const W = Maru.W, H = Maru.H; if(!W) return;
+  const sw = Math.max(3, W*0.0055);
+  Maru.items.forEach((q, i)=>{
+    if(!validBox(q.answer_box)) return;
+    const [y1,x1,y2,x2] = q.answer_box.map((v,k)=>v/1000*(k%2 ? W : H));
+    const cx = (x1+x2)/2, cy = (y1+y2)/2, bw = x2-x1, bh = y2-y1;
+    const g = svgEl('g', {});
+    if(q.status==='ok'){
+      g.appendChild(svgEl('ellipse', {cx, cy, rx:Math.max(bw*0.62, W*0.03), ry:Math.max(bh*0.72, W*0.022), fill:'none', stroke:RED, 'stroke-width':sw, transform:'rotate(-5 '+cx+' '+cy+')'}));
+    }else if(q.status==='ng'){
+      const r = Math.min(Math.max(bh*0.62, W*0.025), W*0.06);
+      g.appendChild(svgEl('path', {d:'M'+(cx-r)+' '+(cy-r)+'L'+(cx+r)+' '+(cy+r)+'M'+(cx+r)+' '+(cy-r)+'L'+(cx-r)+' '+(cy+r), stroke:RED, 'stroke-width':sw*1.15, 'stroke-linecap':'round', fill:'none'}));
+    }else{
+      const r = Math.min(Math.max(bh*0.7, W*0.028), W*0.065);
+      g.appendChild(svgEl('path', {d:'M'+cx+' '+(cy-r)+'L'+(cx+r*1.05)+' '+(cy+r*0.75)+'L'+(cx-r*1.05)+' '+(cy+r*0.75)+'Z', stroke:AMBER, 'stroke-width':sw, 'stroke-linejoin':'round', fill:'none'}));
+    }
+    if(q.status!=='ok' && q.correct_answer){
+      const color = q.status==='ng' ? RED : AMBER;
+      const two = q.status==='check' && q.alt && q.alt.answer && !sameAnswerText(q.correct_answer, q.alt.answer);
+      const txt = q.status==='check' ? '？'+(two ? q.correct_answer+'／'+q.alt.answer : q.correct_answer) : String(q.correct_answer);
+      let fs = Math.min(Math.max(bh*0.75, W*0.028), W*0.05);
+      let fx, fy, fw;
+      if(validBox(q.free_box)){
+        const [fy1,fx1,fy2,fx2] = q.free_box.map((v,k)=>v/1000*(k%2 ? W : H));
+        fx = fx1 + fs*0.2; fy = (fy1+fy2)/2 + fs*0.35; fw = fx2-fx1-fs*0.4;
+        fs = Math.min(fs, Math.max(fy2-fy1, W*0.02));
+      }else if(x2 + W*0.02 + textWidth(txt, fs) < W){ fx = x2 + W*0.02; fy = cy + fs*0.35; fw = W - fx - W*0.01; }
+      else { fs *= 0.8; fx = Math.max(W*0.01, x1); fy = Math.min(H - fs*0.3, y2 + fs*1.05); fw = W - fx - W*0.01; }
+      const tw = textWidth(txt, fs); if(fw > 0 && tw > fw) fs = Math.max(W*0.02, fs*fw/tw);
+      g.appendChild(svgEl('text', {x:fx, y:fy, fill:color, 'font-size':fs, 'font-weight':600, 'font-family':"'Klee One','Zen Maru Gothic',sans-serif", transform:'rotate(-3 '+fx+' '+fy+')'}, txt));
+    }
+    const pad = Math.max(W*0.01, bh*0.3);
+    const hit = svgEl('rect', {x:x1-pad, y:y1-pad, width:bw+pad*2, height:bh+pad*2, fill:'transparent', class:'hit', role:'button', tabindex:'0', 'aria-label':(q.no||'')+'の〇×を切りかえ'});
+    hit.addEventListener('click', ()=>toggleMark(i));
+    hit.addEventListener('keydown', e=>{ if(e.key==='Enter' || e.key===' '){ e.preventDefault(); toggleMark(i); } });
+    g.appendChild(hit);
+    svg.appendChild(g);
+  });
+}
+function toggleMark(i){
+  const q = Maru.items[i]; if(!q) return;
+  const order = q.orig==='check' ? ['ok','ng','check'] : ['ok','ng'];
+  q.status = order[(order.indexOf(q.status)+1) % order.length];
+  drawMarks(); renderExplain(); setScore();
+}
+function setScore(){
+  const el = $('#mScore'), n = Maru.items.length;
+  if(!n){ el.hidden = true; $('#mSet').style.marginLeft='auto'; return; }
+  const ok = Maru.items.filter(q=>q.status==='ok').length;
+  el.hidden = false; $('#mSet').style.marginLeft='0';
+  el.innerHTML = '<svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#ff8a84" stroke-width="2.6"><circle cx="12" cy="12" r="8"/></svg>';
+  el.appendChild(document.createTextNode(ok+' / '+n+' 問 正解'));
+}
+
+/* ---- 解説の一覧 ---- */
+const ICON = {
+  ok:'<svg role="img" aria-label="正解" width="28" height="28" viewBox="0 0 28 28"><circle cx="14" cy="14" r="10" fill="none" stroke="#7fb2ff" stroke-width="3"/></svg>',
+  ng:'<svg role="img" aria-label="まちがい" width="28" height="28" viewBox="0 0 28 28"><path d="M7 7 21 21M21 7 7 21" stroke="#ff8a84" stroke-width="3.2" stroke-linecap="round"/></svg>',
+  check:'<svg role="img" aria-label="要確認" width="28" height="28" viewBox="0 0 28 28"><path d="M14 4 25 23H3z" fill="none" stroke="#ffb547" stroke-width="2.8" stroke-linejoin="round"/></svg>',
+};
+function el(tag, cls, text){ const e = document.createElement(tag); if(cls) e.className = cls; if(text!=null) e.textContent = text; return e; }
+function renderExplain(){
+  const list = $('#mList'); list.innerHTML = '';
+  const ng = Maru.items.filter(q=>q.status==='ng').map(q=>q.no), ck = Maru.items.filter(q=>q.status==='check').map(q=>q.no);
+  $('#mSum').textContent = !Maru.items.length ? '' :
+    (ng.length ? 'まちがい：'+ng.join('・') : 'まちがいはありません') + (ck.length ? '　要確認：'+ck.join('・') : '') + '　（AIが解いた答えと解き方です）';
+  for(const q of Maru.items){
+    const c = el('article', 'mCard '+q.status);
+    const hd = el('div', 'hd'); hd.insertAdjacentHTML('beforeend', ICON[q.status]);
+    hd.appendChild(el('h2', '', (q.no ? q.no+'　' : '') + (q.question||'')));
+    if(q.status==='ok') hd.appendChild(el('span', 'ans', q.correct_answer||''));
+    else hd.appendChild(el('span', 'lab', q.status==='ng' ? 'まちがい' : '要確認')).style.color = q.status==='ng' ? '#ff8a84' : '#ffb547';
+    c.appendChild(hd);
+    if(q.status!=='ok'){
+      const two = el('div', 'two');
+      const d1 = el('div'); d1.appendChild(el('span', '', '書いた答え')); d1.appendChild(el('b', '', q.student_answer||'')); two.appendChild(d1);
+      const d2 = el('div', q.status==='ng' ? 'right' : 'right chk'); d2.appendChild(el('span', '', q.status==='ng' ? '正しい答え' : 'AIの答え（1回目）')); d2.appendChild(el('b', '', q.correct_answer||'')); two.appendChild(d2);
+      c.appendChild(two);
+    }
+    if(q.orig==='check' && q.alt){
+      c.appendChild(el('p', 'warn', 'AIの2回の答えが分かれました。1回目：'+(q.correct_answer||'')+'（'+(q.is_correct?'〇':'×')+'）／2回目：'+(q.alt.answer||'')+'（'+(q.alt.ok?'〇':'×')+'）。解き方を見て、〇×を押して決めてください。'));
+    }
+    if(q.explanation) c.appendChild(el('p', '', q.explanation));
+    if(q.status!=='ok' && q.point) c.appendChild(el('p', 'pt', 'ポイント　'+q.point));
+    list.appendChild(c);
+  }
+}
+
+/* ---- APIキーの設定 ---- */
+function openKeySheet(then){
+  Maru.afterKey = !!then; $('#keyText').value = '';
+  const k = aiKey(); $('#keyNow').hidden = !k; if(k) $('#keyNow').textContent = '設定ずみです（使うAI：'+k.model+'）。キーを変えるときだけ貼り付けてください。';
+  $('#keyWrap').classList.add('on');
+}
+$('#keyCancel').onclick = ()=>$('#keyWrap').classList.remove('on');
+function rankModels(names){
+  const bad = /(lite|image|tts|audio|live|embed|robotics|computer|nano|gemma|learnlm|aqa|imagen|veo|lyria|customtools|native|dialog|translate|vision|search|deep-research|antigravity)/i;
+  const c = [...new Set(names)].filter(n=>/^gemini-/i.test(n) && !bad.test(n));
+  const score = n=>{ const v = parseFloat((n.match(/^gemini-(\d+(?:\.\d+)?)/i)||[])[1]||'0'); const tier = /pro/i.test(n) ? 3 : /flash/i.test(n) ? 1 : 2;
+    return v*10 + tier + (/preview|exp/i.test(n) ? 0 : 0.5) - (/latest/i.test(n) ? 0.3 : 0) - (/\d{2}-\d{2,4}$/.test(n) ? 0.2 : 0); };
+  return c.sort((a,b)=>score(b)-score(a));
+}
+async function listModels(k){
+  let res; try{ res = await fetch(AI_API+'models?pageSize=200&key='+encodeURIComponent(k)); }catch(e){ throw aiErr(0, String(e)); }
+  if(!res.ok) throw aiErr(res.status, await res.text().catch(()=>''));
+  const j = await res.json();
+  return (j.models||[]).filter(m=>(m.supportedGenerationMethods||[]).includes('generateContent')).map(m=>String(m.name).replace(/^models\//,''));
+}
+async function probeModels(k, ranked){
+  let last = null;
+  for(let i=0; i<Math.min(ranked.length, 8); i++){
+    try{ await aiPost(k, ranked[i], {contents:[{role:'user', parts:[{text:'1+1の答えを数字だけで。'}]}]}); return {model:ranked[i], models:ranked.slice(i)}; }
+    catch(e){ last = e; if(e.status===400 && /API key/i.test(e.text)) throw e; if(e.status===429 && !noQuota(e)) return {model:ranked[i], models:ranked.slice(i)}; }
+  }
+  throw last || aiErr(404, 'nomodel');
+}
+$('#keyOk').onclick = async ()=>{
+  const m = $('#keyText').value.match(/AIza[0-9A-Za-z_\-]{20,}/);
+  if(!m){ toast('キー（AIza で始まる文字）が見つかりませんでした'); return; }
+  await busy('AIにつないでいます…');
+  try{
+    const ranked = rankModels(await listModels(m[0]));
+    if(!ranked.length) throw aiErr(404, 'nomodel');
+    const pick = await probeModels(m[0], ranked);
+    saveAiKey({k:m[0], model:pick.model, models:pick.models, cfg:0});
+    unbusy(); $('#keyWrap').classList.remove('on');
+    toast('丸付けの準備ができました（使うAI：'+pick.model+'）');
+    if(Maru.afterKey) setTimeout(maruShoot, 600);
+  }catch(e){
+    unbusy(); console.warn('key', e);
+    toast(e.status===400 || e.status===403 ? 'キーが正しくないようです。コピーし直してください' : e.status===0 ? 'AIにつながりませんでした。電波を確かめてください' : 'このキーで使えるAIが見つかりませんでした（'+(e.status||'')+'）');
+  }
+};
 $('#setupBtn').onclick = ()=>{ $('#setupText').value=''; $('#setupWrap').classList.add('on'); };
 $('#setupCancel').onclick = ()=>$('#setupWrap').classList.remove('on');
 $('#setupOk').onclick = ()=>{ const m = $('#setupText').value.match(/#setup=([A-Za-z0-9_-]+)/); if(!m){ toast('設定リンクが見つかりませんでした'); return; }
