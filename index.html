@@ -188,6 +188,7 @@ button{font:inherit;color:inherit;border:0;background:none;cursor:pointer;paddin
     </div>
 
     <div class="homeFoot"><svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#d14f74" stroke-width="2" stroke-linecap="round"><path d="M12 3v3M12 18v3M3 12h3M18 12h3M5.6 5.6l2.1 2.1M16.3 16.3l2.1 2.1M5.6 18.4l2.1-2.1M16.3 7.7l2.1-2.1"/></svg><span id="homeFootText">ボタンを押すとカメラが起動します</span></div>
+    <button id="setupBtn" hidden style="min-height:48px;border-radius:999px;background:#ffd9e2;color:#8a2d4b;font-weight:700;font-size:14px">最初の設定：設定リンクを貼り付ける</button>
   </div>
 </section>
 
@@ -304,6 +305,14 @@ button{font:inherit;color:inherit;border:0;background:none;cursor:pointer;paddin
     <p id="sendMsg">次の画面で「ドライブ」を選び、保存先のフォルダをここにして「保存」を押してください。</p>
     <div class="where" id="sendWhere"></div>
     <div class="row"><button id="sendCancel">やめる</button><button class="primary" id="sendGo">ドライブに送る</button></div>
+  </div>
+</div>
+<div class="sheetWrap" id="setupWrap">
+  <div class="sheet">
+    <h3>最初の設定</h3>
+    <p>前に送った「スマホ用の設定リンク」（https://cooo521.github.io/scan/#setup=… で始まるもの）を長押しでコピーして、下に貼り付けてください。</p>
+    <textarea id="setupText" rows="4" style="width:100%;border-radius:12px;border:0;padding:10px;font:inherit;font-size:13px;background:#262a33;color:#fff;-webkit-user-select:text;user-select:text" placeholder="ここに貼り付け"></textarea>
+    <div class="row"><button id="setupCancel">やめる</button><button class="primary" id="setupOk">設定する</button></div>
   </div>
 </div>
 <div class="sheetWrap" id="askWrap">
@@ -994,8 +1003,11 @@ function clearBatch(){ for(const p of state.pages) for(const o of p.outs) URL.re
 function stamp(){ const d=new Date(), z=v=>String(v).padStart(2,'0'); return d.getFullYear()+z(d.getMonth()+1)+z(d.getDate())+'_'+z(d.getHours())+z(d.getMinutes()); }
 
 /* ======================= ① 送り先を選ぶ ======================= */
+// Androidアプリ（かんたんスキャン）の中で開いているとき
+const NATIVE = !!(window.Android && typeof window.Android.scan === 'function');
 document.querySelectorAll('[data-dest]').forEach(b=>b.onclick=()=>{
   state.dest = b.dataset.dest; clearBatch();
+  if(NATIVE){ toast('スキャナーを開いています…'); try{ window.Android.scan(state.dest); }catch(e){ toast('スキャナーを開けませんでした'); } return; }
   const d = DEST[state.dest];
   $('#cDest').textContent = '送り先：'+d.child+' › '+d.kind;
   $('#cDot').style.background = d.color;
@@ -1317,24 +1329,30 @@ const Send = { file:null, count:0 };
 // ドライブへ直接送る設定（Apps Script の受け取り係）。合言葉はこのスマホの中にだけ保存する
 let upload = (()=>{ try{ const o=JSON.parse(localStorage.getItem('kscan.upload')||'null'); return o&&o.u&&o.k?o:null; }catch(e){ return null; } })();
 const UP_URL = /^https:\/\/script\.google\.com\/macros\/s\/[A-Za-z0-9_-]+\/exec$/;
-(function readSetupLink(){
-  const m = location.hash.match(/^#setup=([A-Za-z0-9_-]+)$/);
-  if(!m) return;
-  history.replaceState(null, '', location.pathname);
+function applySetup(code){
   try{
-    const o = JSON.parse(atob(m[1].replace(/-/g,'+').replace(/_/g,'/')));
+    const o = JSON.parse(atob(code.replace(/-/g,'+').replace(/_/g,'/')));
     if(!o || !UP_URL.test(o.u) || !o.k) throw new Error('bad');
     upload = {u:o.u, k:String(o.k)};
     try{ localStorage.setItem('kscan.upload', JSON.stringify(upload)); }catch(e){}
-    setTimeout(testUpload, 400);
-  }catch(e){ setTimeout(()=>toast('設定用のリンクが読めませんでした'), 400); }
+    setTimeout(testUpload, 300); return true;
+  }catch(e){ setTimeout(()=>toast('設定用のリンクが読めませんでした'), 300); return false; }
+}
+(function readSetupLink(){
+  const m = location.hash.match(/^#setup=([A-Za-z0-9_-]+)$/);
+  if(!m) return;
+  history.replaceState(null, '', location.pathname+location.search);
+  applySetup(m[1]);
 })();
 async function testUpload(){
   try{ const j = await (await fetch(upload.u)).json(); toast(j && j.ok ? 'ドライブへ直接送る設定ができました' : '設定しましたが、受け取り係から返事がありません'); }
   catch(e){ toast('設定しましたが、受け取り係につながりませんでした'); }
   syncHomeFoot();
 }
-function syncHomeFoot(){ $('#homeFootText').textContent = upload ? '送ると、選んだフォルダに直接入ります' : 'ボタンを押すとカメラが起動します'; }
+function syncHomeFoot(){
+  $('#homeFootText').textContent = upload ? '送ると、選んだフォルダに直接入ります' : NATIVE ? 'ボタンを押すとスキャナーが開きます' : 'ボタンを押すとカメラが起動します';
+  $('#setupBtn').hidden = !(NATIVE && !upload);
+}
 function blobToB64(blob){ return new Promise((res,rej)=>{ const r=new FileReader(); r.onload=()=>res(String(r.result).split(',')[1]); r.onerror=()=>rej(r.error); r.readAsDataURL(blob); }); }
 
 async function prepareSend(){
@@ -1349,10 +1367,30 @@ async function prepareSend(){
   if(upload){ await sendDirect(); return; }
   unbusy(); openShareSheet();
 }
+window.onNativeScan = async (dest, pages)=>{
+  await busy('受け取っています…');
+  try{
+    const b64 = window.Android.takeScan(); if(!b64) throw new Error('empty');
+    const bin = atob(b64), u8 = new Uint8Array(bin.length); for(let i=0;i<bin.length;i++) u8[i]=bin.charCodeAt(i);
+    state.dest = dest; const d = DEST[dest];
+    Send.file = new File([u8], d.child+'_'+d.kind+'_'+stamp()+'.pdf', {type:'application/pdf'}); Send.count = pages; Send.b64 = b64;
+  }catch(e){ console.error(e); unbusy(); toast('スキャンしたPDFを受け取れませんでした'); return; }
+  if(upload){ await sendDirect(); return; }
+  unbusy(); openShareSheet();
+};
+window.onNativeScanCancel = ()=>toast('スキャンをやめました');
+window.onNativeScanError = msg=>toast('スキャナーでエラーが出ました（'+msg+'）');
+window.appBack = ()=>{
+  if($('#sendWrap').classList.contains('on')){ $('#sendWrap').classList.remove('on'); return 'ok'; }
+  if($('#setupWrap').classList.contains('on')){ $('#setupWrap').classList.remove('on'); return 'ok'; }
+  if($('#home').classList.contains('active')) return 'exit';
+  if($('#camera').classList.contains('active')){ $('#cBack').click(); return 'ok'; }
+  show('home'); return 'ok';
+};
 async function sendDirect(){
   await busy('ドライブに送っています…（'+Send.count+'ページ）');
   try{
-    const data = await blobToB64(Send.file);
+    const data = Send.b64 || await blobToB64(Send.file);
     const res = await fetch(upload.u, {method:'POST', body:JSON.stringify({key:upload.k, dest:state.dest, name:Send.file.name, data})});
     const j = await res.json();
     unbusy();
@@ -1363,7 +1401,7 @@ async function sendDirect(){
   openShareSheet();
 }
 function openShareSheet(){
-  const d = DEST[state.dest], canShare = !!(navigator.canShare && navigator.canShare({files:[Send.file]}));
+  const d = DEST[state.dest], canShare = NATIVE || !!(navigator.canShare && navigator.canShare({files:[Send.file]}));
   $('#sendTitle').textContent = canShare ? 'ドライブに送ります（'+Send.count+'ページ）' : 'PDFを保存します（'+Send.count+'ページ）';
   $('#sendWhere').textContent = d.parent+' › '+d.folder;
   $('#sendGo').textContent = canShare ? 'ドライブに送る' : 'PDFを保存';
@@ -1373,6 +1411,7 @@ function openShareSheet(){
 $('#sendCancel').onclick = ()=>$('#sendWrap').classList.remove('on');
 $('#sendGo').onclick = async()=>{
   const f = Send.file; if(!f) return;
+  if(NATIVE){ try{ window.Android.sharePdf(Send.b64 || await blobToB64(f), f.name); $('#sendWrap').classList.remove('on'); finishSent('share'); }catch(e){ toast('共有できませんでした'); } return; }
   if(navigator.canShare && navigator.canShare({files:[f]})){
     try{ await navigator.share({files:[f], title:f.name}); $('#sendWrap').classList.remove('on'); finishSent('share'); }
     catch(e){ if(e && e.name==='AbortError') toast('送るのをやめました'); else { console.error(e); toast('共有できませんでした'); } }
@@ -1391,10 +1430,10 @@ function finishSent(mode){
   $('#sNote').textContent = mode==='direct' ? 'フォルダに入りました。次の取り込みのときに、復習の仕組みが読み込みます'
     : mode==='download' ? 'ダウンロードしたPDFを「'+d.parent+' › '+d.folder+'」に入れてください'
     : 'ドライブで「保存」まで押せていれば完了です。次の取り込みのときに、復習の仕組みが読み込みます';
-  clearBatch(); Send.file=null; updateCamBar();
+  clearBatch(); Send.file=null; Send.b64=null; updateCamBar();
   show('sent');
 }
-$('#sMore').onclick = ()=>show('camera');
+$('#sMore').onclick = ()=>{ if(NATIVE){ toast('スキャナーを開いています…'); window.Android.scan(state.dest); return; } show('camera'); };
 $('#sHome').onclick = ()=>show('home');
 
 /* ======================= 枠の調整 ======================= */
@@ -1516,6 +1555,10 @@ async function openExisting(page, back){
   try{ const c=await loadFile(page.srcBlob); unbusy(); openEdit(page,c,'edit'); } catch(e){ console.error(e); unbusy(); toast('開けませんでした'); }
 }
 
+$('#setupBtn').onclick = ()=>{ $('#setupText').value=''; $('#setupWrap').classList.add('on'); };
+$('#setupCancel').onclick = ()=>$('#setupWrap').classList.remove('on');
+$('#setupOk').onclick = ()=>{ const m = $('#setupText').value.match(/#setup=([A-Za-z0-9_-]+)/); if(!m){ toast('設定リンクが見つかりませんでした'); return; }
+  if(applySetup(m[1])){ $('#setupWrap').classList.remove('on'); syncHomeFoot(); } };
 syncHomeFoot();
 // テスト用に中の処理を外から呼べるようにしておく
 window.Scan={detect,renderPage,buildPdf,loadFile,imageDataOf,state,settings,DEST,Cam};
