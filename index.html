@@ -2030,24 +2030,37 @@ function openKeySheet(then){
 }
 $('#keyCancel').onclick = ()=>$('#keyWrap').classList.remove('on');
 function rankModels(names){
-  const bad = /(lite|image|tts|audio|live|embed|robotics|computer|nano|gemma|learnlm|aqa|imagen|veo|lyria|customtools|native|dialog|translate|vision|search|deep-research|antigravity)/i;
+  const bad = /(image|tts|audio|live|embed|robotics|computer|nano|gemma|learnlm|aqa|imagen|veo|lyria|customtools|native|dialog|translate|vision|search|deep-research|antigravity)/i;
   const c = [...new Set(names)].filter(n=>/^gemini-/i.test(n) && !bad.test(n));
   const score = n=>{ const v = parseFloat((n.match(/^gemini-(\d+(?:\.\d+)?)/i)||[])[1]||'0'); const tier = /pro/i.test(n) ? 3 : /flash/i.test(n) ? 1 : 2;
-    return v*10 + tier + (/preview|exp/i.test(n) ? 0 : 0.5) - (/latest/i.test(n) ? 0.3 : 0) - (/\d{2}-\d{2,4}$/.test(n) ? 0.2 : 0); };
+    return v*10 + tier + (/preview|exp/i.test(n) ? 0 : 0.5) - (/latest/i.test(n) ? 0.3 : 0) - (/\d{2}-\d{2,4}$/.test(n) ? 0.2 : 0) - (/lite/i.test(n) ? 1000 : 0); };   // Lite は最後の手段
   return c.sort((a,b)=>score(b)-score(a));
 }
 async function listModels(k){
   const j = await aiRequest(AI_API+'models?pageSize=200', k, {}, 20000, 'list');
   return (j.models||[]).filter(m=>(m.supportedGenerationMethods||[]).includes('generateContent')).map(m=>String(m.name).replace(/^models\//,''));
 }
+// 賢い順に1つずつ試して、無料で返事をくれた一番賢いAIを選ぶ（無料枠のないAIは飛ばす）
 async function probeModels(k, ranked){
-  let last = null; const n = Math.min(ranked.length, 4);
+  let last = null, spare = null; const n = Math.min(ranked.length, 14), tried = [];
   for(let i=0; i<n; i++){
     $('#busyMsg').textContent = 'AIを選んでいます…（'+(i+1)+'/'+n+'：'+ranked[i]+'）';
-    try{ await aiPost(k, ranked[i], {contents:[{role:'user', parts:[{text:'1+1の答えを数字だけで。'}]}]}, 25000); return {model:ranked[i], models:ranked.slice(i)}; }
-    catch(e){ last = e; if(e.status===401 || e.status===400 && /API key/i.test(e.text)) throw e; if(e.status===429 && !noQuota(e)) return {model:ranked[i], models:ranked.slice(i)}; }
+    try{
+      await aiPost(k, ranked[i], {contents:[{role:'user', parts:[{text:'1+1の答えを数字だけで。'}]}]}, 25000);
+      return {model:ranked[i], models:ranked.slice(i)};
+    }catch(e){
+      last = e; tried.push(ranked[i]+'('+(e.status===-2 ? '時間切れ' : e.status)+')');
+      if(e.status===401 || e.status===400 && /API key/i.test(e.text)) throw e;
+      if(e.status===429 && !noQuota(e) && !spare) spare = i;     // 回数の上限なだけ（無料枠はある）
+    }
   }
-  throw last || aiErr(404, 'nomodel');
+  if(spare!=null) return {model:ranked[spare], models:ranked.slice(spare)};
+  const e = last || aiErr(404, 'nomodel'); e.tried = tried; throw e;
+}
+function aiErrShort(e){
+  let m = String(e.text||''); try{ m = JSON.parse(m).error.message || m; }catch(_){}
+  const lim = m.match(/limit:\s*\d+/i); m = m.replace(/\s+/g,' ').slice(0,110);
+  return (lim ? lim[0]+' / ' : '') + m;
 }
 $('#keyOk').onclick = async ()=>{
   const m = $('#keyText').value.match(/AQ\.[^\s"'<>（）「」、。]{20,}|AIza[0-9A-Za-z_\-]{20,}/);
@@ -2063,9 +2076,9 @@ $('#keyOk').onclick = async ()=>{
     if(Maru.afterKey) setTimeout(maruShoot, 600);
   }catch(e){
     unbusy(); console.warn('key', e);
-    toast(e.status===400 || e.status===401 || e.status===403 ? 'キーが正しくないようです。コピーし直してください' : e.status===0 ? 'AIにつながりませんでした。電波を確かめてください' : e.status===-2 ? 'AIから返事がありませんでした。もう一度「設定する」を押してください' : 'このキーで使えるAIが見つかりませんでした（'+(e.status||'')+'）');
+    toast(e.tried && e.status===429 ? '無料で使えるAIが見つかりませんでした。下の「くわしく」を見せてください' : e.status===400 || e.status===401 || e.status===403 ? 'キーが正しくないようです。コピーし直してください' : e.status===0 ? 'AIにつながりませんでした。電波を確かめてください' : e.status===-2 ? 'AIから返事がありませんでした。もう一度「設定する」を押してください' : 'このキーで使えるAIが見つかりませんでした（'+(e.status||'')+'）');
     $('#keyNow').hidden = false;
-    $('#keyNow').textContent = 'くわしく：'+(e.status===-2 ? '時間切れ' : (e.status||''))+' '+(e.model||'')+' '+String(e.text||'').replace(/\s+/g,' ').slice(0,160);
+    $('#keyNow').textContent = 'くわしく：'+(e.tried ? '試したAI '+e.tried.join(' ')+' ／ ' : (e.status===-2 ? '時間切れ ' : (e.status||'')+' '+(e.model||'')+' '))+aiErrShort(e);
   }
 };
 $('#setupBtn').onclick = ()=>{ $('#setupText').value=''; $('#setupWrap').classList.add('on'); };
