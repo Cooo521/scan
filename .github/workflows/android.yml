@@ -26,15 +26,26 @@ jobs:
           gradle-version: '8.10.2'
 
       # 毎回同じ署名でアプリを作る（入れ直さずに上書きできるように）
+      # 鍵は GitHub の保管場所（キャッシュ）に置いておく。最初の1回だけ新しく作る
       - name: Keep the same signing key
+        id: key
         uses: actions/cache@v4
         with:
-          path: ~/.android/debug.keystore
-          key: kantan-scan-debug-keystore-v1
+          path: ~/kantan-debug.keystore
+          key: kantan-scan-keystore-v2
+
+      - name: Make the signing key (first time only)
+        if: steps.key.outputs.cache-hit != 'true'
+        run: |
+          keytool -genkeypair -v -keystore ~/kantan-debug.keystore -storepass android -keypass android \
+            -alias androiddebugkey -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=Android Debug,O=Android,C=US"
 
       - name: Build APK
         working-directory: android
         run: |
+          export KANTAN_KEYSTORE="$HOME/kantan-debug.keystore"
+          test -f "$KANTAN_KEYSTORE"
+          keytool -list -v -keystore "$KANTAN_KEYSTORE" -storepass android | grep -m1 "SHA256:" || true
           set -o pipefail
           gradle assembleDebug --no-daemon --stacktrace 2>&1 | tee ../build.log
 

@@ -1,0 +1,19 @@
+# 署名の鍵が GitHub の保管場所から消えないように、週に1回さわっておく
+# （7日間だれも使わないと消えるため）
+name: Keep signing key
+
+on:
+  schedule:
+    - cron: '17 3 * * 1'
+  workflow_dispatch:
+
+jobs:
+  touch:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Touch the signing key
+        uses: actions/cache/restore@v4
+        with:
+          path: ~/kantan-debug.keystore
+          key: kantan-scan-keystore-v2
+      - run: ls -la ~/kantan-debug.keystore || echo "まだ鍵がありません"

@@ -1,23 +1,20 @@
 package io.github.cooo521.kantanscan
 
 import android.annotation.SuppressLint
-import android.appwidget.AppWidgetHost
-import android.appwidget.AppWidgetHostView
-import android.appwidget.AppWidgetManager
-import android.appwidget.AppWidgetProviderInfo
+import android.content.ComponentName
 import android.content.Intent
+import android.content.pm.ResolveInfo
 import android.graphics.Color
+import android.net.Uri
+import android.os.BaseBundle
 import android.os.Bundle
-import android.os.Handler
-import android.os.Looper
+import android.os.PersistableBundle
 import android.util.Base64
-import android.view.View
 import android.view.ViewGroup
 import android.webkit.JavascriptInterface
 import android.webkit.WebResourceRequest
 import android.webkit.WebView
 import android.webkit.WebViewClient
-import android.widget.FrameLayout
 import androidx.activity.ComponentActivity
 import androidx.activity.OnBackPressedCallback
 import androidx.activity.result.IntentSenderRequest
@@ -28,6 +25,7 @@ import androidx.core.view.WindowInsetsCompat
 import com.google.mlkit.vision.documentscanner.GmsDocumentScannerOptions
 import com.google.mlkit.vision.documentscanner.GmsDocumentScanning
 import com.google.mlkit.vision.documentscanner.GmsDocumentScanningResult
+import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
 
@@ -36,9 +34,9 @@ import java.io.File
  * 画面はホームページ（GitHub Pages）をそのまま表示する。
  *
  * ボタンが押されたときの動き:
- *  1. そのボタンが「ドライブのスキャン」とつながっていれば、アプリの中に見えないように置いた
- *     ドライブの「ドライブ スキャン」ウィジェットを代わりに押して、ドライブのスキャン画面を開く
- *     （保存先のフォルダは、つなぐときにドライブの画面で選んだもの）。
+ *  1. そのボタンが「ドライブのスキャン」とつながっていれば、ドライブのスキャン画面を開く。
+ *     つなぐときは、ホーム画面に「ドライブ スキャン」を置くときと同じ画面（ドライブのフォルダ選び）を
+ *     アプリから開き、ドライブが返してきた「開き方」を覚えておく。
  *  2. つながっていない・開けなかったときは、Google のドキュメントスキャナー（ML Kit）を開き、
  *     できた PDF を画面側に渡す（送り先のフォルダへの保存は画面側＝受け取り係が行う）。
  */
@@ -47,32 +45,21 @@ class MainActivity : ComponentActivity() {
     companion object {
         const val START_URL = "https://cooo521.github.io/scan/?app=1"
         const val DRIVE_PKG = "com.google.android.apps.docs"
-        const val HOST_ID = 4801
-        const val REQ_BIND = 4802
-        const val REQ_CONFIG = 4803
-        const val PREFS = "drive_widgets"
-        const val OPEN_TIMEOUT_MS = 3500L
+        const val PREFS = "drive_shortcuts"
     }
 
     private lateinit var web: WebView
     private var pendingDest: String? = null
     @Volatile private var lastPdfB64: String? = null
 
-    // ドライブのウィジェットを置くための仕組み
-    private lateinit var widgetMgr: AppWidgetManager
-    private lateinit var widgetHost: AppWidgetHost
-    private lateinit var widgetBox: FrameLayout
+    // ドライブのスキャンとつなぐ
     private val prefs by lazy { getSharedPreferences(PREFS, MODE_PRIVATE) }
-    private val widgetViews = HashMap<String, AppWidgetHostView>()
     private var connectDest: String? = null
-    private var connectId = -1
-    private var waitOpenDest: String? = null
-    private val ui = Handler(Looper.getMainLooper())
-    private val openTimeout = Runnable {
-        val d = waitOpenDest ?: return@Runnable
-        waitOpenDest = null
-        jsCall("onDriveScan", d, "noopen")
-    }
+
+    private val shortcutLauncher =
+        registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+            onShortcutResult(result.resultCode, result.data)
+        }
 
     private val scanLauncher =
         registerForActivityResult(ActivityResultContracts.StartIntentSenderForResult()) { result ->
@@ -103,21 +90,7 @@ class MainActivity : ComponentActivity() {
     @SuppressLint("SetJavaScriptEnabled")
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        widgetMgr = AppWidgetManager.getInstance(this)
-        widgetHost = AppWidgetHost(applicationContext, HOST_ID)
-        if (savedInstanceState != null) {
-            connectDest = savedInstanceState.getString("connectDest")
-            connectId = savedInstanceState.getInt("connectId", -1)
-        }
-
-        val root = FrameLayout(this)
-        val dp = resources.displayMetrics.density
-        // ドライブのウィジェットは、画面のうしろに透明にして置いておく（見えない・さわれない）
-        widgetBox = FrameLayout(this).apply {
-            alpha = 0f
-            importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS
-        }
-        root.addView(widgetBox, FrameLayout.LayoutParams((140 * dp).toInt(), (140 * dp).toInt()))
+        connectDest = savedInstanceState?.getString("connectDest")
 
         web = WebView(this)
         web.setBackgroundColor(Color.parseColor("#FFF7EE"))
@@ -140,11 +113,8 @@ class MainActivity : ComponentActivity() {
             v.setPadding(bars.left, bars.top, bars.right, bars.bottom)
             insets
         }
-        root.addView(web, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
-        setContentView(root)
+        setContentView(web, ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
         if (savedInstanceState != null) web.restoreState(savedInstanceState) else web.loadUrl(START_URL)
-
-        restoreWidgets(cleanUp = savedInstanceState == null)
 
         onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
             override fun handleOnBackPressed() {
@@ -155,32 +125,10 @@ class MainActivity : ComponentActivity() {
         })
     }
 
-    override fun onStart() {
-        super.onStart()
-        try { widgetHost.startListening() } catch (_: Exception) {}
-    }
-
-    override fun onStop() {
-        super.onStop()
-        try { widgetHost.stopListening() } catch (_: Exception) {}
-    }
-
-    override fun onPause() {
-        super.onPause()
-        // ドライブの画面が前に出た＝開けた
-        val d = waitOpenDest
-        if (d != null) {
-            waitOpenDest = null
-            ui.removeCallbacks(openTimeout)
-            jsCall("onDriveScan", d, "opened")
-        }
-    }
-
     override fun onSaveInstanceState(outState: Bundle) {
         super.onSaveInstanceState(outState)
         web.saveState(outState)
         outState.putString("connectDest", connectDest)
-        outState.putInt("connectId", connectId)
     }
 
     private fun js(code: String) {
@@ -211,147 +159,199 @@ class MainActivity : ComponentActivity() {
             }
     }
 
-    // ---------------- ドライブの「ドライブ スキャン」ウィジェット ----------------
+    // ---------------- ドライブの「ドライブ スキャン」（ショートカット） ----------------
 
-    /** ドライブのアプリの中から「スキャン」のウィジェットを探す */
-    private fun findScanProvider(): AppWidgetProviderInfo? {
-        val list = try {
-            widgetMgr.getInstalledProvidersForPackage(DRIVE_PKG, null)
-        } catch (_: Exception) {
-            emptyList()
-        }
-        fun label(p: AppWidgetProviderInfo): String =
-            try { p.loadLabel(packageManager) ?: "" } catch (_: Exception) { "" }
-        return list.firstOrNull { label(it).contains("スキャン") || label(it).contains("scan", ignoreCase = true) }
-            ?: list.firstOrNull { it.provider.className.contains("scan", ignoreCase = true) }
-    }
-
-    /** 前につないだウィジェットを、アプリを開くたびに置き直す */
-    private fun restoreWidgets(cleanUp: Boolean) {
-        val keep = HashSet<Int>()
-        val ed = prefs.edit()
-        for ((dest, v) in prefs.all) {
-            val id = (v as? Int) ?: continue
-            val info = widgetMgr.getAppWidgetInfo(id)
-            if (info == null) { ed.remove(dest); continue }
-            keep.add(id)
-            attachView(dest, id, info)
-        }
-        ed.apply()
-        if (connectId >= 0) keep.add(connectId)
-        // 使っていない部品を片づける
-        if (cleanUp) {
-            try {
-                widgetHost.appWidgetIds.filter { it !in keep }.forEach { widgetHost.deleteAppWidgetId(it) }
-            } catch (_: Exception) {}
-        }
-    }
-
-    private fun attachView(dest: String, id: Int, info: AppWidgetProviderInfo) {
-        widgetViews.remove(dest)?.let { widgetBox.removeView(it) }
-        val v = widgetHost.createView(this, id, info)
-        widgetBox.addView(v, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
-        widgetViews[dest] = v
-    }
-
-    /** つなぐ: ①ウィジェットを作る許可 → ②ドライブの画面で保存先フォルダを選ぶ */
+    /** ドライブのアプリが持っている「ホーム画面に置けるもの」の一覧 */
     @Suppress("DEPRECATION")
+    private fun driveShortcutMakers(): List<ResolveInfo> = try {
+        packageManager.queryIntentActivities(Intent(Intent.ACTION_CREATE_SHORTCUT).setPackage(DRIVE_PKG), 0)
+    } catch (_: Exception) {
+        emptyList()
+    }
+
+    private fun labelOf(r: ResolveInfo): String =
+        try { r.loadLabel(packageManager)?.toString() ?: "" } catch (_: Exception) { "" }
+
+    /** その中から「スキャン」を探す */
+    private fun findScanMaker(): ResolveInfo? {
+        val list = driveShortcutMakers()
+        return list.firstOrNull { labelOf(it).contains("スキャン") || labelOf(it).contains("scan", ignoreCase = true) }
+            ?: list.firstOrNull { it.activityInfo.name.contains("scan", ignoreCase = true) }
+    }
+
+    /** つなぐ: ホーム画面に置くときと同じ「フォルダ選び」の画面を開く */
     private fun connect(dest: String) {
         if (connectDest != null) return
-        val info = findScanProvider()
-        if (info == null) { jsCall("onDriveConnected", dest, "noprovider"); return }
-        val id = widgetHost.allocateAppWidgetId()
+        val maker = findScanMaker()
+        if (maker == null) {
+            val found = driveShortcutMakers().joinToString(" / ") { labelOf(it) + "(" + it.activityInfo.name.substringAfterLast('.') + ")" }
+            jsCall("onDriveConnected", dest, "noprovider", "見つかったもの: " + found.ifEmpty { "なし" })
+            return
+        }
+        val i = Intent(Intent.ACTION_CREATE_SHORTCUT)
+            .setClassName(maker.activityInfo.packageName, maker.activityInfo.name)
         connectDest = dest
-        connectId = id
-        val allowed = try { widgetMgr.bindAppWidgetIdIfAllowed(id, info.provider) } catch (_: Exception) { false }
-        if (allowed) { afterBind(); return }
-        val i = Intent(AppWidgetManager.ACTION_APPWIDGET_BIND)
-            .putExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, id)
-            .putExtra(AppWidgetManager.EXTRA_APPWIDGET_PROVIDER, info.provider)
-        try { startActivityForResult(i, REQ_BIND) } catch (e: Exception) { failConnect("bind") }
-    }
-
-    private fun afterBind() {
-        val info = widgetMgr.getAppWidgetInfo(connectId)
-        if (info == null) { failConnect("bind"); return }
-        if (info.configure == null) { finishConnect("noconfig"); return }
         try {
-            widgetHost.startAppWidgetConfigureActivityForResult(this, connectId, 0, REQ_CONFIG, null)
+            shortcutLauncher.launch(i)
         } catch (e: Exception) {
-            failConnect("config")
+            connectDest = null
+            jsCall("onDriveConnected", dest, "start", e.javaClass.simpleName + ": " + (e.message ?: ""))
         }
     }
 
-    private fun finishConnect(msg: String) {
-        val dest = connectDest ?: return
-        val id = connectId
-        connectDest = null
-        connectId = -1
-        val old = prefs.getInt(dest, -1)
-        if (old >= 0 && old != id) try { widgetHost.deleteAppWidgetId(old) } catch (_: Exception) {}
-        prefs.edit().putInt(dest, id).apply()
-        widgetMgr.getAppWidgetInfo(id)?.let { attachView(dest, id, it) }
-        jsCall("onDriveConnected", dest, msg)
-    }
-
-    private fun failConnect(msg: String) {
-        val dest = connectDest ?: ""
-        if (connectId >= 0) try { widgetHost.deleteAppWidgetId(connectId) } catch (_: Exception) {}
-        connectDest = null
-        connectId = -1
-        jsCall("onDriveConnected", dest, msg)
-    }
-
-    @Deprecated("ウィジェットの許可・設定の結果を受け取るため")
+    /** ドライブから返ってきた「開き方」を覚える */
     @Suppress("DEPRECATION")
-    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
-        super.onActivityResult(requestCode, resultCode, data)
-        when (requestCode) {
-            REQ_BIND -> if (resultCode == RESULT_OK) afterBind() else failConnect("denied")
-            REQ_CONFIG -> if (resultCode == RESULT_OK) finishConnect("ok") else failConnect("cancel")
+    private fun onShortcutResult(code: Int, data: Intent?) {
+        val dest = connectDest ?: return
+        connectDest = null
+        if (code != RESULT_OK || data == null) {
+            jsCall("onDriveConnected", dest, "cancel", "")
+            return
         }
+        val target: Intent? = try { data.getParcelableExtra(Intent.EXTRA_SHORTCUT_INTENT) } catch (_: Exception) { null }
+        if (target == null) {
+            val keys = try { data.extras?.keySet()?.joinToString(", ") } catch (_: Exception) { null } ?: "なし"
+            jsCall("onDriveConnected", dest, "nointent", "返ってきたもの: $keys")
+            return
+        }
+        val name = data.getStringExtra(Intent.EXTRA_SHORTCUT_NAME) ?: ""
+        val o = JSONObject().put("name", name).put("intent", intentToJson(target))
+        prefs.edit().putString(dest, o.toString()).apply()
+        jsCall("onDriveConnected", dest, "ok", describe(target))
     }
 
     private fun disconnect(dest: String) {
-        val id = prefs.getInt(dest, -1)
-        if (id >= 0) try { widgetHost.deleteAppWidgetId(id) } catch (_: Exception) {}
         prefs.edit().remove(dest).apply()
-        widgetViews.remove(dest)?.let { widgetBox.removeView(it) }
     }
 
-    /** ウィジェットの中の「押せる部分」を探す */
-    private fun findClickable(v: View): View? {
-        if (v.hasOnClickListeners()) return v
-        if (v is ViewGroup) {
-            for (i in 0 until v.childCount) {
-                findClickable(v.getChildAt(i))?.let { return it }
+    /** 覚えておいた開き方で、ドライブのスキャン画面を開く */
+    private fun driveScan(dest: String) {
+        val s = prefs.getString(dest, null)
+        if (s == null) { jsCall("onDriveScan", dest, "notconnected", ""); return }
+        try {
+            val i = jsonToIntent(JSONObject(s).getJSONObject("intent"))
+            startActivity(i)
+            jsCall("onDriveScan", dest, "opened", "")
+        } catch (e: Exception) {
+            jsCall("onDriveScan", dest, "blocked", e.javaClass.simpleName + ": " + (e.message ?: ""))
+        }
+    }
+
+    private fun describe(i: Intent): String {
+        val ex = try { i.extras?.keySet()?.joinToString(",") } catch (_: Exception) { null } ?: ""
+        return listOfNotNull(i.action, i.component?.shortClassName, i.dataString?.take(60), if (ex.isEmpty()) null else "extras=$ex")
+            .joinToString(" ")
+    }
+
+    // ---- 開き方（Intent）を文字にして保存する／文字から戻す ----
+
+    private fun intentToJson(i: Intent): JSONObject {
+        val o = JSONObject()
+        i.action?.let { o.put("action", it) }
+        i.dataString?.let { o.put("data", it) }
+        i.type?.let { o.put("type", it) }
+        i.component?.let { o.put("component", it.flattenToString()) }
+        i.`package`?.let { o.put("package", it) }
+        i.categories?.let { o.put("categories", JSONArray(it.toList())) }
+        o.put("flags", i.flags)
+        i.extras?.let { o.put("extras", bundleToJson(it)) }
+        return o
+    }
+
+    private fun jsonToIntent(o: JSONObject): Intent {
+        val i = Intent()
+        o.optString("action").takeIf { it.isNotEmpty() }?.let { i.action = it }
+        val data = o.optString("data").takeIf { it.isNotEmpty() }
+        val type = o.optString("type").takeIf { it.isNotEmpty() }
+        when {
+            data != null && type != null -> i.setDataAndType(Uri.parse(data), type)
+            data != null -> i.data = Uri.parse(data)
+            type != null -> i.type = type
+        }
+        o.optString("component").takeIf { it.isNotEmpty() }?.let { i.component = ComponentName.unflattenFromString(it) }
+        o.optString("package").takeIf { it.isNotEmpty() }?.let { i.`package` = it }
+        o.optJSONArray("categories")?.let { a -> for (k in 0 until a.length()) i.addCategory(a.getString(k)) }
+        i.flags = o.optInt("flags", 0)
+        o.optJSONObject("extras")?.let { i.putExtras(jsonToBundle(it)) }
+        return i
+    }
+
+    @Suppress("DEPRECATION")
+    private fun bundleToJson(b: BaseBundle): JSONObject {
+        val o = JSONObject()
+        for (k in b.keySet()) {
+            val v = try { b.get(k) } catch (_: Exception) { null } ?: continue
+            val e = JSONObject()
+            when (v) {
+                is String -> e.put("t", "s").put("v", v)
+                is Boolean -> e.put("t", "z").put("v", v)
+                is Int -> e.put("t", "i").put("v", v)
+                is Long -> e.put("t", "l").put("v", v)
+                is Double -> e.put("t", "d").put("v", v)
+                is Float -> e.put("t", "f").put("v", v.toDouble())
+                is CharSequence -> e.put("t", "s").put("v", v.toString())
+                is IntArray -> e.put("t", "I").put("v", JSONArray(v.toList()))
+                is LongArray -> e.put("t", "L").put("v", JSONArray(v.toList()))
+                is BooleanArray -> e.put("t", "Z").put("v", JSONArray(v.toList()))
+                is DoubleArray -> e.put("t", "D").put("v", JSONArray(v.toList()))
+                is Array<*> -> if (v.all { it is String }) e.put("t", "S").put("v", JSONArray(v.toList())) else continue
+                is PersistableBundle -> e.put("t", "P").put("v", bundleToJson(v))
+                is Bundle -> e.put("t", "B").put("v", bundleToJson(v))
+                else -> continue
+            }
+            o.put(k, e)
+        }
+        return o
+    }
+
+    private fun jsonToBundle(o: JSONObject): Bundle {
+        val b = Bundle()
+        for (k in o.keys()) {
+            val e = o.getJSONObject(k)
+            when (e.getString("t")) {
+                "s" -> b.putString(k, e.getString("v"))
+                "z" -> b.putBoolean(k, e.getBoolean("v"))
+                "i" -> b.putInt(k, e.getInt("v"))
+                "l" -> b.putLong(k, e.getLong("v"))
+                "d" -> b.putDouble(k, e.getDouble("v"))
+                "f" -> b.putFloat(k, e.getDouble("v").toFloat())
+                "I" -> b.putIntArray(k, e.getJSONArray("v").let { a -> IntArray(a.length()) { a.getInt(it) } })
+                "L" -> b.putLongArray(k, e.getJSONArray("v").let { a -> LongArray(a.length()) { a.getLong(it) } })
+                "Z" -> b.putBooleanArray(k, e.getJSONArray("v").let { a -> BooleanArray(a.length()) { a.getBoolean(it) } })
+                "D" -> b.putDoubleArray(k, e.getJSONArray("v").let { a -> DoubleArray(a.length()) { a.getDouble(it) } })
+                "S" -> b.putStringArray(k, e.getJSONArray("v").let { a -> Array(a.length()) { a.getString(it) } })
+                "P" -> b.putParcelable(k, jsonToPersistable(e.getJSONObject("v")))
+                "B" -> b.putBundle(k, jsonToBundle(e.getJSONObject("v")))
             }
         }
-        return null
+        return b
     }
 
-    /** 見えないウィジェットを代わりに押して、ドライブのスキャン画面を開く */
-    private fun driveScan(dest: String) {
-        val v = widgetViews[dest]
-        if (v == null) { jsCall("onDriveScan", dest, "notconnected"); return }
-        val target = findClickable(v)
-        if (target == null) { jsCall("onDriveScan", dest, "noclick"); return }
-        waitOpenDest = dest
-        ui.removeCallbacks(openTimeout)
-        ui.postDelayed(openTimeout, OPEN_TIMEOUT_MS)
-        try {
-            target.performClick()
-        } catch (e: Exception) {
-            waitOpenDest = null
-            ui.removeCallbacks(openTimeout)
-            jsCall("onDriveScan", dest, "noclick")
+    private fun jsonToPersistable(o: JSONObject): PersistableBundle {
+        val b = PersistableBundle()
+        for (k in o.keys()) {
+            val e = o.getJSONObject(k)
+            when (e.getString("t")) {
+                "s" -> b.putString(k, e.getString("v"))
+                "z" -> b.putBoolean(k, e.getBoolean("v"))
+                "i" -> b.putInt(k, e.getInt("v"))
+                "l" -> b.putLong(k, e.getLong("v"))
+                "d", "f" -> b.putDouble(k, e.getDouble("v"))
+                "I" -> b.putIntArray(k, e.getJSONArray("v").let { a -> IntArray(a.length()) { a.getInt(it) } })
+                "L" -> b.putLongArray(k, e.getJSONArray("v").let { a -> LongArray(a.length()) { a.getLong(it) } })
+                "Z" -> b.putBooleanArray(k, e.getJSONArray("v").let { a -> BooleanArray(a.length()) { a.getBoolean(it) } })
+                "D" -> b.putDoubleArray(k, e.getJSONArray("v").let { a -> DoubleArray(a.length()) { a.getDouble(it) } })
+                "S" -> b.putStringArray(k, e.getJSONArray("v").let { a -> Array(a.length()) { a.getString(it) } })
+                "P", "B" -> b.putPersistableBundle(k, jsonToPersistable(e.getJSONObject("v")))
+            }
         }
+        return b
     }
 
     /** 画面（ホームページ）から呼べる機能 */
     inner class Bridge {
         @JavascriptInterface
-        fun version(): String = "2"
+        fun version(): String = "3"
 
         @JavascriptInterface
         fun scan(dest: String) {
@@ -387,14 +387,18 @@ class MainActivity : ComponentActivity() {
             }
         }
 
-        /** ドライブのスキャンとのつながり: {"provider":"ドライブ スキャン","connected":{"yuri-print":true,…}} */
+        /** ドライブのスキャンとのつながり: {"provider":"ドライブ スキャン","connected":{"yuri-print":"【取込】塾プリント",…}} */
         @JavascriptInterface
         fun driveStatus(): String {
             val o = JSONObject()
-            val p = findScanProvider()
-            o.put("provider", if (p == null) "" else (try { p.loadLabel(packageManager) } catch (_: Exception) { null } ?: "ドライブ スキャン"))
+            val m = findScanMaker()
+            o.put("provider", if (m == null) "" else labelOf(m).ifEmpty { "ドライブ スキャン" })
             val c = JSONObject()
-            for ((dest, v) in prefs.all) if (v is Int) c.put(dest, true)
+            for ((dest, v) in prefs.all) {
+                if (v !is String) continue
+                val name = try { JSONObject(v).optString("name") } catch (_: Exception) { "" }
+                c.put(dest, name.ifEmpty { "つながっています" })
+            }
             o.put("connected", c)
             return o.toString()
         }

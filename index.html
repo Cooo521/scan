@@ -330,9 +330,10 @@ button{font:inherit;color:inherit;border:0;background:none;cursor:pointer;paddin
   <div class="sheet">
     <h3>ドライブのスキャンとつなぐ</h3>
     <p>つないだボタンを押すと、ドライブのスキャン画面が開き、選んだフォルダにそのまま保存されます。つなぐのは1つにつき最初の1回だけです。</p>
-    <p style="font-size:13px">①「つなぐ」を押す　②許可の画面が出たら「常に許可する」にチェックして「作成」　③ドライブのフォルダ選びで、そのボタンの下に書いてあるフォルダを選ぶ</p>
+    <p style="font-size:13px">①「つなぐ」を押す　②ドライブのフォルダ選びの画面で、そのボタンの下に書いてあるフォルダを選んで決定する</p>
     <p id="driveNone" hidden style="color:#ffb4c2">このスマホのドライブのアプリに「ドライブ スキャン」が見つかりませんでした。ドライブのアプリを最新にしてから、もう一度開いてください。</p>
     <div class="dlist" id="driveList"></div>
+    <p id="driveDebug" hidden style="font-size:11px;line-height:1.5;color:#8b92a0;word-break:break-all"></p>
     <button id="driveClose">とじる</button>
   </div>
 </div>
@@ -1413,29 +1414,32 @@ function renderDriveList(){
     row.innerHTML = '<span class="dt"><b></b><small></small><span class="st"></span></span><button></button>';
     row.querySelector('b').textContent = d.child+' › '+d.kind;
     row.querySelector('small').textContent = d.parent+' / '+d.folder;
-    row.querySelector('.st').textContent = on ? '✓ つながっています' : 'まだつないでいません';
+    const nm = typeof Drive.st.connected[k]==='string' ? Drive.st.connected[k] : '';
+    row.querySelector('.st').textContent = on ? '✓ つながっています'+(nm && nm!=='つながっています' ? '（'+nm+'）' : '') : 'まだつないでいません';
     const btn = row.querySelector('button'); btn.textContent = on ? 'つなぎ直す' : 'つなぐ';
     btn.disabled = !Drive.st.provider;
     btn.onclick = ()=>{ toast('「'+d.folder+'」を選んでください'); try{ window.Android.driveConnect(k); }catch(e){ toast('つなげませんでした'); } };
     box.appendChild(row);
   }
 }
-window.onDriveConnected = (dest, msg)=>{
-  refreshDrive();
+function driveDebug(t){ const el=$('#driveDebug'); if(!el) return; el.hidden=!t; el.textContent = t ? 'くわしく：'+t : ''; }
+window.onDriveConnected = (dest, msg, detail)=>{
+  refreshDrive(); driveDebug(detail||'');
   const d = DEST[dest], name = d ? d.child+'の'+d.kind : '';
   const m = {
     ok: name+'をつなぎました',
     noconfig: name+'をつなぎましたが、フォルダを選ぶ画面が出ませんでした（マイドライブに入るかもしれません）',
     noprovider: 'ドライブのアプリに「ドライブ スキャン」が見つかりませんでした',
-    denied: '許可されなかったので、つなげませんでした',
     cancel: 'フォルダが選ばれなかったので、つなげませんでした',
+    nointent: 'ドライブがアプリへの受け渡しに対応していませんでした（ホーム画面のショートカットでしか使えない作りです）',
   }[msg] || 'つなげませんでした（'+msg+'）';
   toast(m);
 };
-window.onDriveScan = async (dest, r)=>{
+window.onDriveScan = async (dest, r, detail)=>{
   if(r==='opened') return;
   if(r==='notconnected'){ refreshDrive(); nativeScan(dest); return; }
-  const why = r==='noopen' ? 'ドライブのスキャン画面が開きませんでした。' : 'ドライブのスキャンのボタンがまだ準備できていませんでした。';
+  driveDebug(detail||''); console.warn('driveScan', r, detail);
+  const why = 'ドライブのスキャン画面が開きませんでした（ドライブが外から開くのを許していないようです）。';
   if(await ask(why+'Googleのスキャナーで撮りますか？', 'Googleのスキャナーで撮る')) nativeScan(dest);
 };
 $('#driveBtn').onclick = ()=>{ refreshDrive(); $('#driveWrap').classList.add('on'); };
