@@ -1811,17 +1811,25 @@ const AI_CONFIGS = [
 function aiErr(status, text, model){ const e = new Error('ai '+status); e.status = status; e.text = String(text||''); e.model = model; return e; }
 function noQuota(e){ return e.status===429 && /limit:\s*0\b/i.test(e.text); }   // 無料枠では使えないモデル
 // キーは x-goog-api-key で送る。だめなとき（通信エラー）は ?key= で送り直す
-async function aiFetch(url, k, opt){
+// 待ち時間には上限をつける（ms を過ぎたら status -2 = 時間切れ）
+async function aiRequest(url, k, opt, ms, model){
   opt = opt || {};
-  try{ return await fetch(url, Object.assign({}, opt, {headers:Object.assign({}, opt.headers||{}, {'x-goog-api-key':k})})); }
-  catch(e){ return fetch(url+(url.includes('?') ? '&' : '?')+'key='+encodeURIComponent(k), opt); }
+  const ctl = new AbortController(), timer = setTimeout(()=>ctl.abort(), ms);
+  try{
+    let res;
+    try{ res = await fetch(url, Object.assign({}, opt, {signal:ctl.signal, headers:Object.assign({}, opt.headers||{}, {'x-goog-api-key':k})})); }
+    catch(e){ if(e.name==='AbortError') throw e; res = await fetch(url+(url.includes('?') ? '&' : '?')+'key='+encodeURIComponent(k), Object.assign({}, opt, {signal:ctl.signal})); }
+    const text = await res.text();
+    if(!res.ok) throw aiErr(res.status, text, model);
+    return JSON.parse(text);
+  }catch(e){
+    if(e.status!=null) throw e;
+    if(e.name==='AbortError') throw aiErr(-2, 'timeout', model);
+    throw aiErr(0, String(e), model);
+  }finally{ clearTimeout(timer); }
 }
-async function aiPost(k, model, body){
-  let res;
-  try{ res = await aiFetch(AI_API+'models/'+encodeURIComponent(model)+':generateContent', k, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)}); }
-  catch(e){ throw aiErr(0, String(e), model); }
-  if(res.ok) return res.json();
-  throw aiErr(res.status, await res.text().catch(()=>''), model);
+function aiPost(k, model, body, ms){
+  return aiRequest(AI_API+'models/'+encodeURIComponent(model)+':generateContent', k, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)}, ms||150000, model);
 }
 async function aiGenerate(parts){
   const key = aiKey(); if(!key) throw aiErr(-1, 'nokey');
@@ -1914,6 +1922,7 @@ function showAiError(e){
   if(s===403){ maruError('このキーではAIを使えませんでした。キーを作り直して、設定し直してください。', true); return; }
   if(s===429){ maruError('AIを使える回数の上限になりました（無料の分）。少し時間をおいて「もう一度」を押してください。', false); return; }
   if(s===0){ maruError('AIにつながりませんでした。電波を確かめて「もう一度」を押してください。', false); return; }
+  if(s===-2){ maruError('AIから時間内に返事がありませんでした。「もう一度」を押してください。', false); return; }
   if(s>=500){ maruError('AIが混んでいるようです。少しおいて「もう一度」を押してください。', false); return; }
   maruError('AIの答えをうまく読み取れませんでした。「もう一度」を押してください。', false);
 }
@@ -2028,15 +2037,14 @@ function rankModels(names){
   return c.sort((a,b)=>score(b)-score(a));
 }
 async function listModels(k){
-  let res; try{ res = await aiFetch(AI_API+'models?pageSize=200', k); }catch(e){ throw aiErr(0, String(e)); }
-  if(!res.ok) throw aiErr(res.status, await res.text().catch(()=>''));
-  const j = await res.json();
+  const j = await aiRequest(AI_API+'models?pageSize=200', k, {}, 20000, 'list');
   return (j.models||[]).filter(m=>(m.supportedGenerationMethods||[]).includes('generateContent')).map(m=>String(m.name).replace(/^models\//,''));
 }
 async function probeModels(k, ranked){
-  let last = null;
-  for(let i=0; i<Math.min(ranked.length, 8); i++){
-    try{ await aiPost(k, ranked[i], {contents:[{role:'user', parts:[{text:'1+1の答えを数字だけで。'}]}]}); return {model:ranked[i], models:ranked.slice(i)}; }
+  let last = null; const n = Math.min(ranked.length, 4);
+  for(let i=0; i<n; i++){
+    $('#busyMsg').textContent = 'AIを選んでいます…（'+(i+1)+'/'+n+'：'+ranked[i]+'）';
+    try{ await aiPost(k, ranked[i], {contents:[{role:'user', parts:[{text:'1+1の答えを数字だけで。'}]}]}, 25000); return {model:ranked[i], models:ranked.slice(i)}; }
     catch(e){ last = e; if(e.status===401 || e.status===400 && /API key/i.test(e.text)) throw e; if(e.status===429 && !noQuota(e)) return {model:ranked[i], models:ranked.slice(i)}; }
   }
   throw last || aiErr(404, 'nomodel');
@@ -2044,7 +2052,7 @@ async function probeModels(k, ranked){
 $('#keyOk').onclick = async ()=>{
   const m = $('#keyText').value.match(/AQ\.[^\s"'<>（）「」、。]{20,}|AIza[0-9A-Za-z_\-]{20,}/);
   if(!m){ toast('キー（AQ. か AIza で始まる文字）が見つかりませんでした'); return; }
-  await busy('AIにつないでいます…');
+  await busy('AIにつないでいます…（使えるAIの一覧を確認中）');
   try{
     const ranked = rankModels(await listModels(m[0]));
     if(!ranked.length) throw aiErr(404, 'nomodel');
@@ -2055,7 +2063,9 @@ $('#keyOk').onclick = async ()=>{
     if(Maru.afterKey) setTimeout(maruShoot, 600);
   }catch(e){
     unbusy(); console.warn('key', e);
-    toast(e.status===400 || e.status===401 || e.status===403 ? 'キーが正しくないようです。コピーし直してください' : e.status===0 ? 'AIにつながりませんでした。電波を確かめてください' : 'このキーで使えるAIが見つかりませんでした（'+(e.status||'')+'）');
+    toast(e.status===400 || e.status===401 || e.status===403 ? 'キーが正しくないようです。コピーし直してください' : e.status===0 ? 'AIにつながりませんでした。電波を確かめてください' : e.status===-2 ? 'AIから返事がありませんでした。もう一度「設定する」を押してください' : 'このキーで使えるAIが見つかりませんでした（'+(e.status||'')+'）');
+    $('#keyNow').hidden = false;
+    $('#keyNow').textContent = 'くわしく：'+(e.status===-2 ? '時間切れ' : (e.status||''))+' '+(e.model||'')+' '+String(e.text||'').replace(/\s+/g,' ').slice(0,160);
   }
 };
 $('#setupBtn').onclick = ()=>{ $('#setupText').value=''; $('#setupWrap').classList.add('on'); };
