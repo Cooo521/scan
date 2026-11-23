@@ -30,7 +30,7 @@ import org.json.JSONObject
 import java.io.File
 
 /**
- * かんたんスキャン（Androidアプリ）
+ * 復習Scan（旧かんたんスキャン・Androidアプリ）
  * 画面はホームページ（GitHub Pages）をそのまま表示する。
  *
  * ボタンが押されたときの動き:
@@ -378,7 +378,7 @@ class MainActivity : ComponentActivity() {
     /** 画面（ホームページ）から呼べる機能 */
     inner class Bridge {
         @JavascriptInterface
-        fun version(): String = "5"
+        fun version(): String = "6"
 
         @JavascriptInterface
         fun scan(dest: String) {

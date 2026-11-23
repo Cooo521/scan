@@ -10,7 +10,7 @@
     </queries>
 
     <application
-        android:label="かんたんスキャン"
+        android:label="復習Scan"
         android:icon="@mipmap/ic_launcher"
         android:roundIcon="@mipmap/ic_launcher"
         android:theme="@android:style/Theme.Material.Light.NoActionBar"
