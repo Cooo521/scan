@@ -424,9 +424,9 @@ button.mark .badge{color:#b23a62}
   <div class="sheet">
     <h3>丸付けの準備（最初の1回だけ）</h3>
     <p>丸付けにはGoogleのAI（Gemini）を無料で使います。無料のAPIキーを作って、下に貼り付けてください。カードの登録はいりません。</p>
-    <p style="font-size:13px">①「キーを作るページを開く」→ Googleでログイン　②「APIキーを作成」→ できたキー（AIza で始まる文字）をコピー　③ この画面にもどって貼り付け、「設定する」</p>
+    <p style="font-size:13px">①「キーを作るページを開く」→ Googleでログイン　②「APIキーを作成」→ できたキー（AQ. で始まる文字）を、横のコピーボタンでコピー　③ この画面にもどって貼り付け、「設定する」</p>
     <a class="open" href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">キーを作るページを開く</a>
-    <input id="keyText" type="text" inputmode="url" autocomplete="off" spellcheck="false" placeholder="AIza…" aria-label="APIキー">
+    <input id="keyText" type="text" inputmode="url" autocomplete="off" spellcheck="false" placeholder="AQ.…" aria-label="APIキー">
     <p id="keyNow" style="font-size:12px;color:#a9afbb" hidden></p>
     <div class="row"><button id="keyCancel">やめる</button><button class="primary" id="keyOk">設定する</button></div>
   </div>
@@ -1810,9 +1810,15 @@ const AI_CONFIGS = [
 ];
 function aiErr(status, text, model){ const e = new Error('ai '+status); e.status = status; e.text = String(text||''); e.model = model; return e; }
 function noQuota(e){ return e.status===429 && /limit:\s*0\b/i.test(e.text); }   // 無料枠では使えないモデル
+// キーは x-goog-api-key で送る。だめなとき（通信エラー）は ?key= で送り直す
+async function aiFetch(url, k, opt){
+  opt = opt || {};
+  try{ return await fetch(url, Object.assign({}, opt, {headers:Object.assign({}, opt.headers||{}, {'x-goog-api-key':k})})); }
+  catch(e){ return fetch(url+(url.includes('?') ? '&' : '?')+'key='+encodeURIComponent(k), opt); }
+}
 async function aiPost(k, model, body){
   let res;
-  try{ res = await fetch(AI_API+'models/'+encodeURIComponent(model)+':generateContent?key='+encodeURIComponent(k), {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)}); }
+  try{ res = await aiFetch(AI_API+'models/'+encodeURIComponent(model)+':generateContent', k, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)}); }
   catch(e){ throw aiErr(0, String(e), model); }
   if(res.ok) return res.json();
   throw aiErr(res.status, await res.text().catch(()=>''), model);
@@ -1904,7 +1910,7 @@ async function maruGrade(run){
 function showAiError(e){
   const s = e && e.status;
   if(s===-1){ openKeySheet(false); maruError('丸付けの準備（APIキー）がまだです。', true); return; }
-  if(s===400 && /API key|API_KEY/i.test(e.text||'')){ maruError('APIキーが正しくないようです。キーを設定し直してください。', true); return; }
+  if(s===401 || s===400 && /API key|API_KEY/i.test(e.text||'')){ maruError('APIキーが正しくないようです。キーを設定し直してください。', true); return; }
   if(s===403){ maruError('このキーではAIを使えませんでした。キーを作り直して、設定し直してください。', true); return; }
   if(s===429){ maruError('AIを使える回数の上限になりました（無料の分）。少し時間をおいて「もう一度」を押してください。', false); return; }
   if(s===0){ maruError('AIにつながりませんでした。電波を確かめて「もう一度」を押してください。', false); return; }
@@ -2022,7 +2028,7 @@ function rankModels(names){
   return c.sort((a,b)=>score(b)-score(a));
 }
 async function listModels(k){
-  let res; try{ res = await fetch(AI_API+'models?pageSize=200&key='+encodeURIComponent(k)); }catch(e){ throw aiErr(0, String(e)); }
+  let res; try{ res = await aiFetch(AI_API+'models?pageSize=200', k); }catch(e){ throw aiErr(0, String(e)); }
   if(!res.ok) throw aiErr(res.status, await res.text().catch(()=>''));
   const j = await res.json();
   return (j.models||[]).filter(m=>(m.supportedGenerationMethods||[]).includes('generateContent')).map(m=>String(m.name).replace(/^models\//,''));
@@ -2031,13 +2037,13 @@ async function probeModels(k, ranked){
   let last = null;
   for(let i=0; i<Math.min(ranked.length, 8); i++){
     try{ await aiPost(k, ranked[i], {contents:[{role:'user', parts:[{text:'1+1の答えを数字だけで。'}]}]}); return {model:ranked[i], models:ranked.slice(i)}; }
-    catch(e){ last = e; if(e.status===400 && /API key/i.test(e.text)) throw e; if(e.status===429 && !noQuota(e)) return {model:ranked[i], models:ranked.slice(i)}; }
+    catch(e){ last = e; if(e.status===401 || e.status===400 && /API key/i.test(e.text)) throw e; if(e.status===429 && !noQuota(e)) return {model:ranked[i], models:ranked.slice(i)}; }
   }
   throw last || aiErr(404, 'nomodel');
 }
 $('#keyOk').onclick = async ()=>{
-  const m = $('#keyText').value.match(/AIza[0-9A-Za-z_\-]{20,}/);
-  if(!m){ toast('キー（AIza で始まる文字）が見つかりませんでした'); return; }
+  const m = $('#keyText').value.match(/AQ\.[0-9A-Za-z_\-.]{20,}|AIza[0-9A-Za-z_\-]{20,}/);
+  if(!m){ toast('キー（AQ. か AIza で始まる文字）が見つかりませんでした'); return; }
   await busy('AIにつないでいます…');
   try{
     const ranked = rankModels(await listModels(m[0]));
@@ -2049,7 +2055,7 @@ $('#keyOk').onclick = async ()=>{
     if(Maru.afterKey) setTimeout(maruShoot, 600);
   }catch(e){
     unbusy(); console.warn('key', e);
-    toast(e.status===400 || e.status===403 ? 'キーが正しくないようです。コピーし直してください' : e.status===0 ? 'AIにつながりませんでした。電波を確かめてください' : 'このキーで使えるAIが見つかりませんでした（'+(e.status||'')+'）');
+    toast(e.status===400 || e.status===401 || e.status===403 ? 'キーが正しくないようです。コピーし直してください' : e.status===0 ? 'AIにつながりませんでした。電波を確かめてください' : 'このキーで使えるAIが見つかりませんでした（'+(e.status||'')+'）');
   }
 };
 $('#setupBtn').onclick = ()=>{ $('#setupText').value=''; $('#setupWrap').classList.add('on'); };
