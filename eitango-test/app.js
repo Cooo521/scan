@@ -74,13 +74,32 @@ function gasPost(body){
 function summary(){
   const L4 = lvInfo(S.lvExp['4'] || 0), L3 = lvInfo(S.lvExp['3'] || 0);
   const k = id => `${knownCount(id)}/${(lvlOf(id).words || []).length}語`;
-  return {exp:S.exp, lv4:L4.l, known4:k('4'), lv3:L3.l, known3:k('3'), stamps:S.stamps};
+  return {exp:S.exp, lv4:L4.l, known4:k('4'), due4:dueList('4').length, lv3:L3.l, known3:k('3'), due3:dueList('3').length, stamps:S.stamps};
+}
+const LOG_KEY = () => SAVE_KEY + ':log';
+function pendingLog(){ try { return JSON.parse(lsGet(LOG_KEY()) || '[]'); } catch (e) { return []; } }
+function queueLog(items){ if (items && items.length) lsSet(LOG_KEY(), JSON.stringify(pendingLog().concat(items))); }
+function wordTable(){
+  const rows = [], order = {redo:0, hold:1, grad:2};
+  LEVELS.filter(l => !l.locked).forEach(l => {
+    const ws = wsOf(l.id), byEn = byEnOf(l.id);
+    Object.keys(ws).filter(en => byEn.has(en)).sort((a, b) => (order[ws[a].st] - order[ws[b].st]) || String(ws[a].due).localeCompare(String(ws[b].due)))
+      .forEach(en => { const e = ws[en]; rows.push([l.name, en, byEn.get(en).main, ST_LABEL[e.st] || e.st, e.due || '', e.ok || 0, e.ng || 0, e.last || '']); });
+  });
+  return rows;
 }
 function pushSave(){
   if (!G.url) return Promise.resolve(false);
   lsSet(SAVE_KEY + ':pending', '1');
-  return gasPost({a:'save', c:USER.id, data:{v:1, savedAt:S.savedAt, exp:S.exp, lvExp:S.lvExp, known:S.known, stamps:S.stamps, level:S.level, summary:summary()}})
-    .then(j => { if (j && j.ok) { try { localStorage.removeItem(SAVE_KEY + ':pending'); } catch (e) {} G.status = 'ok'; return true; } throw new Error((j && j.error) || 'save'); })
+  const log = pendingLog();
+  const data = Object.assign(saveData(), {summary:summary()});
+  return gasPost({a:'save', c:USER.id, name:USER.name, data, log, table:wordTable()})
+    .then(j => {
+      if (!j || !j.ok) throw new Error((j && j.error) || 'save');
+      try { localStorage.removeItem(SAVE_KEY + ':pending'); } catch (e) {}
+      const rest = pendingLog().slice(log.length); lsSet(LOG_KEY(), JSON.stringify(rest));
+      G.status = 'ok'; return true;
+    })
     .catch(() => { G.status = 'err'; return false; });
 }
 async function syncStart(){
@@ -115,7 +134,7 @@ const NAME = esc(USER.name);
 const SAVE_KEY = 'eitango-test-v1:' + USER.id;
 const PRAISE = [`さすが ${NAME}！`, `${NAME}、すごい！`, `その ちょうし、${NAME}！`, `${NAME}、ばっちり！`];
 let praiseN = 0;
-const S = {exp:0, lvExp:{'4':0, '3':0}, known:{'4':[], '3':[]}, stamps:4, level:'4', tok:0, run:null, resetArm:false};
+const S = {exp:0, lvExp:{'4':0, '3':0}, wst:{'4':{}, '3':{}}, plans:{}, stampDate:'', stamps:4, level:'4', savedAt:0, tok:0, run:null, resetArm:false};
 function loadSave(){
   try {
     let raw = localStorage.getItem(SAVE_KEY);
@@ -125,15 +144,62 @@ function loadSave(){
   } catch (e) {}
 }
 function adoptSave(d){
-  S.exp = d.exp || 0; S.lvExp = Object.assign({'4':0, '3':0}, d.lvExp || {}); S.known = Object.assign({'4':[], '3':[]}, d.known || {});
+  S.exp = d.exp || 0; S.lvExp = Object.assign({'4':0, '3':0}, d.lvExp || {});
+  S.wst = Object.assign({'4':{}, '3':{}}, d.wst || {});
+  if (!d.wst && d.known) Object.keys(d.known).forEach(id => (d.known[id] || []).forEach(en => { S.wst[id] = S.wst[id] || {}; S.wst[id][en] = {st:'grad', due:'', ok:1, ng:0, last:''}; }));
+  S.plans = d.plans || {}; S.stampDate = d.stampDate || '';
   S.stamps = d.stamps != null ? d.stamps : 4; S.level = d.level || '4'; S.savedAt = d.savedAt || 0;
 }
+function saveData(){ return {v:2, savedAt:S.savedAt, exp:S.exp, lvExp:S.lvExp, wst:S.wst, plans:S.plans, stampDate:S.stampDate, stamps:S.stamps, level:S.level}; }
 function save(keepTime){
   if (!keepTime) S.savedAt = Date.now();
-  try { localStorage.setItem(SAVE_KEY, JSON.stringify({savedAt:S.savedAt, exp:S.exp, lvExp:S.lvExp, known:S.known, stamps:S.stamps, level:S.level})); } catch (e) {}
+  try { localStorage.setItem(SAVE_KEY, JSON.stringify(saveData())); } catch (e) {}
 }
 function addExp(n){ S.exp += n; S.lvExp[S.level] = (S.lvExp[S.level] || 0) + n; }
-function knownCount(id){ const l = lvlOf(id), k = new Set(S.known[id] || []); return (l.words || []).filter(w => k.has(w.en)).length; }
+/* ---------- 1日の出し方とステータス ---------- */
+const NEW_PER_DAY = 15, REV_PER_DAY = 15, DAY_CAP = 30, HOLD_DAYS = 14;
+const ST_LABEL = {new:'はじめて', redo:'やり直し', hold:'保留', grad:'卒業'};
+const ymd = t => t.getFullYear() + '-' + String(t.getMonth() + 1).padStart(2, '0') + '-' + String(t.getDate()).padStart(2, '0');
+function today(){ return ymd(new Date()); }
+function addDays(ds, n){ const p = ds.split('-').map(Number); return ymd(new Date(p[0], p[1] - 1, p[2] + n)); }
+function wsOf(id){ return S.wst[id] || (S.wst[id] = {}); }
+function byEnOf(id){ return new Map((lvlOf(id).words || []).map(w => [w.en, w])); }
+/* 期限が来た復習（前日の×＝やり直しが先、つぎに保留の定着確認。それぞれ期限の古い順） */
+function dueList(id, excl){
+  const ws = wsOf(id), t = today(), byEn = byEnOf(id);
+  return Object.keys(ws).filter(en => byEn.has(en) && ws[en].st !== 'grad' && ws[en].due && ws[en].due <= t && !(excl && excl.has(en)))
+    .sort((a, b) => ((ws[a].st === 'redo' ? 0 : 1) - (ws[b].st === 'redo' ? 0 : 1)) || (ws[a].due < ws[b].due ? -1 : ws[a].due > ws[b].due ? 1 : 0))
+    .map(en => byEn.get(en));
+}
+function newList(id){ const ws = wsOf(id); return (lvlOf(id).words || []).filter(w => !ws[w.en]); }
+function planFor(id){
+  const t = today(), p = S.plans[id];
+  if (p && p.date === t) return p;
+  const nw = newList(id), newN = Math.min(NEW_PER_DAY, nw.length);
+  const revN = nw.length < NEW_PER_DAY ? DAY_CAP - newN : REV_PER_DAY;
+  const rv = dueList(id).slice(0, revN);
+  S.plans[id] = {date:t, rev:rv.map(w => w.en), nw:nw.slice(0, newN).map(w => w.en), first:{}, finished:false};
+  save(true);
+  return S.plans[id];
+}
+function planLeft(p){ return p.rev.concat(p.nw).filter(en => !(en in p.first)); }
+function backlog(id){
+  const p = S.plans[id], excl = new Set(p && p.date === today() && !p.finished ? planLeft(p) : []);
+  return dueList(id, excl);
+}
+function updateStatus(w, out){
+  const ws = wsOf(S.level), t = today(), prev = ws[w.en] ? Object.assign({}, ws[w.en]) : null;
+  const before = prev ? prev.st : 'new';
+  const n = Object.assign({ok:0, ng:0}, prev || {});
+  if (out === 'o') n.ok++; else n.ng++;
+  n.last = t;
+  if (out !== 'o') { n.st = 'redo'; n.due = addDays(t, 1); }
+  else if (before === 'redo') { n.st = 'hold'; n.due = addDays(t, HOLD_DAYS); }
+  else { n.st = 'grad'; n.due = ''; }
+  ws[w.en] = n;
+  return {prev, before, after:n.st};
+}
+function knownCount(id){ const ws = wsOf(id); return (lvlOf(id).words || []).filter(w => ws[w.en] && ws[w.en].st === 'grad').length; }
 function knownPct(id){ const l = lvlOf(id); return l.words && l.words.length ? Math.round(knownCount(id) / l.words.length * 100) : 0; }
 
 function need(l){ return 40 + l * 20; }
@@ -275,7 +341,7 @@ function toHira(s){ return s.replace(/[ァ-ヶ]/g, c => String.fromCharCode(c.ch
 function norm(s){ return toHira(s).replace(/[\s、。，．,.！？!?・「」『』ー〜~]/g, ''); }
 function jaOk(alts, w){
   const ans = w.ja.map(norm);
-  return alts.some(a => { const n = norm(a); return ans.some(x => x && n.includes(x)); });
+  return alts.some(a => { const n = norm(a); return ans.some(x => x && (x.length <= 1 ? (n === x || n === x + 'です') : n.includes(x))); });
 }
 
 /* ---------- pictures ---------- */
@@ -335,15 +401,35 @@ function render(html, bg){
   window.scrollTo(0, 0);
 }
 
+function dueTone(n){
+  if (n <= REV_PER_DAY) return {bg:'#EAF3DE', fg:'#27500A', seg:'#97C459', msg:'ふくしゅう OK'};
+  if (n <= REV_PER_DAY * 3) return {bg:'#FAEEDA', fg:'#633806', seg:'#EF9F27', msg:'たまってるよ'};
+  return {bg:'#FAECE7', fg:'#712B13', seg:'#F0997B', msg:'いっぱい たまってるよ'};
+}
+function backlogCard(){
+  const due = dueList(S.level).length, extra = backlog(S.level).length, tone = dueTone(due);
+  const days = Math.ceil(due / REV_PER_DAY), filled = Math.min(5, days);
+  const segs = [0, 1, 2, 3, 4].map(i => `<div style="flex:1;height:14px;border-radius:4px;background:${i < filled ? tone.seg : '#F1EFE8'};"></div>`).join('');
+  return `<div class="panel" style="text-align:left;">
+<div style="display:flex;justify-content:space-between;align-items:baseline;"><span style="font-size:15px;font-weight:700;">🔁 ふくしゅう まち</span><span style="font-size:24px;font-weight:700;color:${tone.fg};">${due}<span style="font-size:13px;">こ</span></span></div>
+<div style="display:flex;gap:4px;margin:8px 0 4px;">${segs}</div>
+<p style="font-size:13px;margin:0;color:${tone.fg};">${due <= REV_PER_DAY ? 'ふくしゅう OK！ きょうの ぶんで ぜんぶ できるよ' : `あと ${days}日分 ${tone.msg}（1日 ${REV_PER_DAY}こ ずつ）`}</p>
+${extra > 0 ? `<button class="btn" data-a="review" style="background:#FAC775;border-color:#BA7517;color:#633806;font-size:18px;">🔁 ふくしゅうだけ やる（${Math.min(REV_PER_DAY, extra)}こ）</button>` : ''}</div>`;
+}
 function home(){
-  const L = lvInfo(S.lvExp[S.level]);
+  const L = lvInfo(S.lvExp[S.level]), p = planFor(S.level), byEn = byEnOf(S.level);
+  const leftRev = p.rev.filter(en => !(en in p.first) && byEn.has(en)).length, leftNew = p.nw.filter(en => !(en in p.first) && byEn.has(en)).length;
+  const started = Object.keys(p.first).length > 0;
+  const bub = p.finished ? `${NAME}、きょうの ぶんは おわり！<br>また あしたね♪`
+    : (leftRev + leftNew === 0 ? `${NAME}、もう1回タイムの つづきだよ！` : `${NAME}、きょうは ${leftRev + leftNew}まい！<br>あたらしい ${leftNew}・ふくしゅう ${leftRev}`);
   render(`
 <div class="top"><button class="sbtn" data-a="select">← レベルを かえる</button><span class="pill lvp">${lvlOf(S.level).name}　Lv ${L.l}</span></div>
 <div class="bar"><i style="width:${pct(L)}%"></i></div>
-<div class="center"><div class="bub">${NAME}、きょうは ${words().length}まい！<br>いっしょに がんばろ♪</div>${pico('n', 140)}</div>
-<button class="btn pink" data-a="start">▶ はじめる</button>
+<div class="center"><div class="bub">${bub}</div>${pico(p.finished ? 'h' : 'n', 130)}</div>
+${p.finished ? '' : `<button class="btn pink" data-a="start">▶ ${started ? 'つづきから' : 'はじめる'}</button>`}
+${backlogCard()}
 <div class="panel">${stampCard(S.stamps, -1)}</div>
-<p class="note">【おうちの人へ】テスト版です（単語5つ）。マイクの許可を聞かれたら「許可」を押してください。ボタンを押さなくても、発音のあとにピコの合図で自動で聞き取りが始まります（発音を2回聞いたら、すぐ日本語で答える3秒）。聞き取れた言葉が小さく表示されるので、聞き取りの正確さを確かめられます。${SR ? '' : (IN_FRAME ? '<br><b>この画面（Claudeの中）では声の聞き取りが使えません。画面のボタンで答えて、流れを確かめてください。声で試すときは、GitHubに置いたテスト版を開いてください。</b>' : '<br><b>この端末・ブラウザでは声の聞き取りが使えません。Chromeで開いてください（それまでは画面のボタンで答えられます）。</b>')}</p>`, '#FBEAF0');
+<p class="note">【おうちの人へ】テスト版です。1日に あたらしい単語${NEW_PER_DAY}こ＋ふくしゅう${REV_PER_DAY}こ（上限${DAY_CAP}こ）。最初に○の単語は卒業、×と△は翌日やり直し→○で保留→${HOLD_DAYS}日後に定着確認→○で卒業です。マイクの許可を聞かれたら「許可」を押してください。ボタンを押さなくても、発音のあとにピコの合図で自動で聞き取りが始まります（発音を2回聞いたら、すぐ日本語で答える3秒）。聞き取れた言葉が小さく表示されるので、聞き取りの正確さを確かめられます。${SR ? '' : (IN_FRAME ? '<br><b>この画面（Claudeの中）では声の聞き取りが使えません。画面のボタンで答えて、流れを確かめてください。声で試すときは、GitHubに置いたテスト版を開いてください。</b>' : '<br><b>この端末・ブラウザでは声の聞き取りが使えません。Chromeで開いてください（それまでは画面のボタンで答えられます）。</b>')}</p>`, '#FBEAF0');
 }
 
 function select(){
@@ -352,11 +438,11 @@ function select(){
     if (l.locked) return `<button class="lvbtn locked" data-a="locked"><span class="lvname">${l.name}</span><span class="lvside">🔒 じゅんびちゅう</span></button>`;
     const L = lvInfo(S.lvExp[l.id] || 0), p = knownPct(l.id);
     return `<button class="lvbtn ${l.id === S.level ? 'sel' : ''}" data-a="pick" data-l="${l.id}">
-<span class="lvname">${p >= 100 ? '👑 ' : ''}${l.name}</span>
+<span><span class="lvname">${p >= 100 ? '👑 ' : ''}${l.name}</span><br>${(() => { const n = dueList(l.id).length, tn = dueTone(n); return `<span class="pill" style="background:${tn.bg};color:${tn.fg};font-size:12px;font-weight:500;margin-top:4px;">🔁 ${n > REV_PER_DAY ? `ふくしゅう まち ${n}こ` : 'ふくしゅう OK'}</span>`; })()}</span>
 <span class="lvside"><span class="lvnum">Lv ${L.l}</span><span class="minibar"><i style="width:${p}%"></i></span><span class="lvpct">おぼえた ${p}%</span></span></button>`;
   }).join('');
   render(`
-<div class="top"><span class="ttl">${NAME}の えいたんご <small>テスト版 v6</small></span><span class="pill lvp">ピコ　けいけんち ${S.exp}</span></div>
+<div class="top"><span class="ttl">${NAME}の えいたんご <small>テスト版 v7</small></span><span class="pill lvp">ピコ　けいけんち ${S.exp}</span></div>
 <div class="center" style="margin-top:10px;"><div class="bub" id="bub">${NAME}、どの レベルを やる？</div>${pico('n', 110)}</div>
 <div style="margin-top:10px;">${rows}</div>
 <div class="note">【おうちの人へ】テスト版です（${NAME}用のリンク）。記録はこの端末と、つないだGoogleの「きろく」に${NAME}の分として保存されます。<br><span id="gasline">${gasLine()}</span>
@@ -364,10 +450,26 @@ function select(){
 <div style="margin-top:8px;display:flex;gap:6px;flex-wrap:wrap;"><button class="sbtn" data-a="gasopen" style="font-size:12px;padding:4px 10px;">Googleと つなぐ</button><button class="sbtn" data-a="reset" id="resetb" style="font-size:12px;padding:4px 10px;">きろくを けす</button></div></div>`, '#FBEAF0');
 }
 
+function newRun(mode, all, queue, first){
+  S.run = {mode, phase:'main', round:0, all, queue, idx:0, first:first || {}, retryFailed:[], recovered:0, log:[],
+           combo:0, maxCombo:0, gains:{o:0, d:0, x:0, combo:0, retry:0, stamp:0, full:0}, cnt:{o:0, d:0, x:0}, expStart:S.lvExp[S.level]};
+}
 function startRun(){
   audio();
-  S.run = {phase:'main', round:0, queue:shuffle(words().slice()), idx:0, first:{}, retryFailed:[], recovered:0,
-           combo:0, maxCombo:0, gains:{o:0, d:0, x:0, combo:0, retry:0, stamp:0, full:0}, cnt:{o:0, d:0, x:0}, expStart:S.lvExp[S.level]};
+  const p = planFor(S.level), byEn = byEnOf(S.level);
+  const all = p.rev.concat(p.nw).map(en => byEn.get(en)).filter(Boolean);
+  if (!all.length) { home(); return; }
+  const leftRev = p.rev.filter(en => !(en in p.first)).map(en => byEn.get(en)).filter(Boolean);
+  const leftNew = p.nw.filter(en => !(en in p.first)).map(en => byEn.get(en)).filter(Boolean);
+  newRun('daily', all, shuffle(leftRev).concat(shuffle(leftNew)), Object.assign({}, p.first));
+  if (!S.run.queue.length) { S.run.idx = 0; endRound(); return; }
+  showCard();
+}
+function startReview(){
+  audio();
+  const q = backlog(S.level).slice(0, REV_PER_DAY);
+  if (!q.length) { home(); return; }
+  newRun('review', q.slice(), shuffle(q.slice()), {});
   showCard();
 }
 function cur(){ const R = S.run; return R.queue[R.idx]; }
@@ -375,7 +477,8 @@ function progressHtml(){
   const R = S.run;
   if (R.phase === 'main') {
     const n = R.queue.length;
-    return `<span class="stars">${'★'.repeat(R.idx)}<span class="rest">${'☆'.repeat(n - R.idx)}</span></span>`;
+    if (n > 15) return `<span style="font-size:15px;font-weight:700;">${R.mode === 'review' ? '🔁 ' : ''}${R.idx + 1} / ${n}</span><span class="minibar" style="width:120px;display:inline-block;margin-left:8px;"><i style="width:${Math.round(R.idx / n * 100)}%"></i></span>`;
+    return `<span class="stars">${R.mode === 'review' ? '🔁 ' : ''}${'★'.repeat(R.idx)}<span class="rest">${'☆'.repeat(n - R.idx)}</span></span>`;
   }
   return `<span style="font-size:14px;font-weight:700;">もう1回タイム ${R.round}しゅうめ（${R.idx + 1}/${R.queue.length}）</span>`;
 }
@@ -436,6 +539,12 @@ function applyResult(out){
   const rec = {out, comboBefore:R.combo, add:0, comboBonus:false};
   if (R.phase === 'main') {
     R.first[w.en] = out; R.cnt[out]++;
+    const su = updateStatus(w, out);
+    rec.prevWs = su.prev; rec.stBefore = su.before;
+    if (R.mode === 'daily') { const p = S.plans[S.level]; if (p) p.first[w.en] = out; }
+    R.log.push({t:new Date().toISOString(), lv:lvlOf(S.level).name, en:w.en, ja:w.main, res:{o:'○', d:'△', x:'×'}[out], retry:'',
+                kind:su.before === 'new' ? 'あたらしい' : 'ふくしゅう', st:ST_LABEL[su.before] + '→' + ST_LABEL[su.after], heard:R.byVoice ? (R.heardAll || R.heard || '') : ''});
+    save();
     if (out === 'o') {
       rec.add = 10; R.gains.o += 10; R.combo++; R.maxCombo = Math.max(R.maxCombo, R.combo);
       if (R.combo % 3 === 0) { rec.add += 5; R.gains.combo += 5; rec.comboBonus = true; }
@@ -443,7 +552,7 @@ function applyResult(out){
     else { rec.add = 2; R.gains.x += 2; R.combo = 0; }
   } else {
     if (out === 'x') R.retryFailed.push(w);
-    else { rec.add = 5; R.gains.retry += 5; R.recovered++; }
+    else { rec.add = 5; R.gains.retry += 5; R.recovered++; const lg = R.log.find(x => x.en === w.en); if (lg) lg.retry = `○（${R.round}しゅうめ）`; }
   }
   addExp(rec.add);
   R.last = rec;
@@ -453,12 +562,15 @@ function revertResult(){
   addExp(-rec.add); R.combo = rec.comboBefore;
   if (R.phase === 'main') {
     R.cnt[rec.out]--; delete R.first[w.en];
+    const ws = wsOf(S.level); if (rec.prevWs) ws[w.en] = rec.prevWs; else delete ws[w.en];
+    if (R.mode === 'daily') { const p = S.plans[S.level]; if (p) delete p.first[w.en]; }
+    const i = R.log.map(x => x.en).lastIndexOf(w.en); if (i >= 0) R.log.splice(i, 1);
     if (rec.out === 'o') { R.gains.o -= 10; if (rec.comboBonus) R.gains.combo -= 5; }
     else if (rec.out === 'd') R.gains.d -= 5;
     else R.gains.x -= 2;
   } else {
     if (rec.out === 'x') R.retryFailed.pop();
-    else { R.recovered--; R.gains.retry -= 5; }
+    else { R.recovered--; R.gains.retry -= 5; const lg = R.log.find(x => x.en === w.en); if (lg) lg.retry = ''; }
   }
 }
 
@@ -512,7 +624,7 @@ function nextCard(){
 function endRound(){
   const R = S.run;
   if (R.phase === 'main') {
-    const rem = words().filter(w => R.first[w.en] !== 'o');
+    const rem = R.all.filter(w => R.first[w.en] !== 'o');
     if (!rem.length) { finish(); return; }
     R.phase = 'retry'; R.round = 1; R.queue = shuffle(rem.slice());
   } else {
@@ -533,20 +645,23 @@ ${R.round >= 3 ? '<p class="small">こんどは ヒントの え が はじめ�
 }
 
 function finish(){
-  const R = S.run;
-  S.stamps++;
-  R.gains.stamp = 50; addExp(50);
-  const full = S.stamps >= 7;
-  if (full) { R.gains.full = 200; addExp(200); }
-  const kn = new Set(S.known[S.level] || []);
-  words().forEach(w => { if (R.first[w.en] === 'o') kn.add(w.en); });
-  S.known[S.level] = [...kn];
+  const R = S.run, t = today();
+  const stampNow = R.mode === 'daily' && S.stampDate !== t;
+  if (R.mode === 'daily') { const p = S.plans[S.level]; if (p) p.finished = true; }
+  let full = false;
+  if (stampNow) {
+    S.stampDate = t; S.stamps++;
+    R.gains.stamp = 50; addExp(50);
+    full = S.stamps >= 7;
+    if (full) { R.gains.full = 200; addExp(200); }
+  }
+  queueLog(R.log); R.log = [];
   save();
   pushSave().then(ok => { const g = $('#savemsg'); if (g) g.textContent = ok ? 'きろくを Googleに ほぞんしました' : (G.url ? 'Googleには あとで ほぞんします' : ''); });
   const g = R.gains, from = lvInfo(R.expStart);
   const rows = [
     ['○ せいかい', g.o, true], ['△ ヒントで せいかい', g.d], ['× チャレンジ', g.x], ['コンボ ボーナス', g.combo],
-    ['もう1回タイム', g.retry], ['きょうの スタンプ', g.stamp, true], ['カード いっぱい ボーナス', g.full]
+    ['もう1回タイム', g.retry], ['きょうの スタンプ', g.stamp, stampNow], ['カード いっぱい ボーナス', g.full]
   ].filter(r => r[2] || r[1] > 0).map(r => `<div class="gr"><span>${r[0]}</span><span>+${r[1]}</span></div>`).join('');
   const total = S.lvExp[S.level] - R.expStart;
   render(`
@@ -556,8 +671,8 @@ ${pico('h', 110, 'bounce')}</div>
 <div class="panel"><p class="lbl">さいしょの こたえ</p><div class="cnts">
 <div class="c o">○<b>${R.cnt.o}</b></div><div class="c d">△ ヒント<b>${R.cnt.d}</b></div><div class="c x">×<b>${R.cnt.x}</b></div></div>
 ${R.maxCombo >= 2 ? `<p class="small">さいこう ${R.maxCombo}コンボ</p>` : ''}</div>
-<div class="panel">${stampCard(S.stamps, S.stamps - 1)}<p class="pon" id="pon">ポンッ！</p>
-<p class="small">${full ? 'スタンプカード いっぱい！ ボーナス +200' : `あと ${7 - S.stamps}こで いっぱい！ ボーナス +200`}</p></div>
+${stampNow ? `<div class="panel">${stampCard(S.stamps, S.stamps - 1)}<p class="pon" id="pon">ポンッ！</p>
+<p class="small">${full ? 'スタンプカード いっぱい！ ボーナス +200' : `あと ${7 - S.stamps}こで いっぱい！ ボーナス +200`}</p></div>` : ''}
 <div class="panel"><p class="lbl">${lvlOf(S.level).name} の レベル</p><div class="lvrow"><span>Lv <b id="lvn">${from.l}</b></span><span class="pill lvup" id="lvup">⬆ レベルアップ！</span></div>
 <div class="bar big"><i id="xbar" style="width:${pct(from)}%"></i></div>
 <p class="small" id="xnext" style="text-align:right;">&nbsp;</p>
@@ -568,6 +683,7 @@ ${R.maxCombo >= 2 ? `<p class="small">さいこう ${R.maxCombo}コンボ</p>` :
   const tk = S.tok;
   setTimeout(() => {
     if (tk !== S.tok) return;
+    if (!stampNow) return;
     const e = $('#newst'); if (e) e.classList.add('on');
     const p = $('#pon'); if (p) p.classList.add('on');
     sfx.stamp();
@@ -594,6 +710,7 @@ async function animateExp(fromExp, toExp, tk){
 /* ---------- actions ---------- */
 const ACT = {
   start: startRun,
+  review: startReview,
   select: select,
   pick(d){ S.level = d.l; save(); pushSave(); home(); },
   gasopen(){ const b = $('#gasbox'); if (b) b.style.display = 'block'; const i = $('#gasurl'); if (i) i.value = G.url || ''; },
@@ -611,7 +728,8 @@ const ACT = {
     const b = $('#resetb');
     if (!S.resetArm) { S.resetArm = true; if (b) b.textContent = 'もう一度 おすと けします'; return; }
     try { localStorage.removeItem(SAVE_KEY); } catch (e) {}
-    S.exp = 0; S.lvExp = {'4':0, '3':0}; S.known = {'4':[], '3':[]}; S.stamps = 4; S.level = '4';
+    S.exp = 0; S.lvExp = {'4':0, '3':0}; S.wst = {'4':{}, '3':{}}; S.plans = {}; S.stampDate = ''; S.stamps = 4; S.level = '4';
+    try { localStorage.removeItem(LOG_KEY()); } catch (e) {}
     save(); pushSave();
     select();
   },
