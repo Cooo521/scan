@@ -108,8 +108,10 @@ async function syncStart(){
   if (!G.url) { G.status = 'off'; return; }
   G.status = 'wait';
   try {
-    const [w, r] = await Promise.all([gasGet({a:'words'}), gasGet({a:'load', c:USER.id})]);
-    if (w && w.ok) { G.count = applyWords(w.levels); lsSet(WCACHE_KEY, JSON.stringify(w.levels)); }
+    const [ws, rs] = await Promise.allSettled([gasGet({a:'words'}), gasGet({a:'load', kid:USER.id})]);
+    const w = ws.status === 'fulfilled' ? ws.value : null, r = rs.status === 'fulfilled' ? rs.value : null;
+    if (!w || !w.ok) throw new Error('words');
+    G.count = applyWords(w.levels); lsSet(WCACHE_KEY, JSON.stringify(w.levels));
     if (r && r.ok && r.rec && (r.rec.savedAt || 0) > (S.savedAt || 0)) { adoptSave(r.rec); save(true); }
     G.status = 'ok';
     if (lsGet(SAVE_KEY + ':pending')) await pushSave();
@@ -451,7 +453,7 @@ function select(){
 <span class="lvside"><span class="lvnum">Lv ${L.l}</span><span class="minibar"><i style="width:${p}%"></i></span><span class="lvpct">おぼえた ${p}%</span></span></button>`;
   }).join('');
   render(`
-<div class="top"><span class="ttl">${NAME}の えいたんご <small>テスト版 v8</small></span><span class="pill lvp">ピコ　けいけんち ${S.exp}</span></div>
+<div class="top"><span class="ttl">${NAME}の えいたんご <small>テスト版 v9</small></span><span class="pill lvp">ピコ　けいけんち ${S.exp}</span></div>
 <div class="center" style="margin-top:10px;"><div class="bub" id="bub">${NAME}、どの レベルを やる？</div>${pico('n', 110)}</div>
 <div style="margin-top:10px;">${rows}</div>
 <div class="note">【おうちの人へ】テスト版です（${NAME}用のリンク）。記録はこの端末と、つないだGoogleの「きろく」に${NAME}の分として保存されます。<br><span id="gasline">${gasLine()}</span>
