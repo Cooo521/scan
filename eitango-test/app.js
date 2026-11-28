@@ -1,5 +1,5 @@
 const LEVELS = [
-  {id:'4', name:'4級レベル', words:[
+  {id:'4', name:'4級レベル', hidden:true, words:[
   {en:'hot', ja:['あつい','暑い','熱い','厚い','暑','熱'], main:'あつい', emoji:'🔥', theme:'ようす・てんき', tc:'#FAEEDA', tt:'#633806',
    ex:["It's ", ' today.'], exJa:['きょうは ', 'あつい', ' ね。'], pair:{lbl:'はんたい', emoji:'🧊', en:'cold', ja:'さむい・つめたい'}},
   {en:'apple', ja:['りんご','林檎'], main:'りんご', emoji:'🍎', theme:'たべもの', tc:'#FBEAF0', tt:'#72243E',
@@ -138,7 +138,7 @@ const NAME = esc(USER.name);
 const SAVE_KEY = 'eitango-test-v1:' + USER.id;
 const PRAISE = [`さすが ${NAME}！`, `${NAME}、すごい！`, `その ちょうし、${NAME}！`, `${NAME}、ばっちり！`];
 let praiseN = 0;
-const S = {exp:0, lvExp:{'4':0, '3':0}, wst:{'4':{}, '3':{}}, plans:{}, stampDate:'', stamps:4, level:'4', savedAt:0, tok:0, run:null, resetArm:false};
+const S = {exp:0, lvExp:{'4':0, '3':0}, wst:{'4':{}, '3':{}}, plans:{}, stampDate:'', stamps:0, level:'3', savedAt:0, tok:0, run:null, resetArm:false};
 function loadSave(){
   try {
     let raw = localStorage.getItem(SAVE_KEY);
@@ -152,9 +152,11 @@ function adoptSave(d){
   S.wst = Object.assign({'4':{}, '3':{}}, d.wst || {});
   if (!d.wst && d.known) Object.keys(d.known).forEach(id => (d.known[id] || []).forEach(en => { S.wst[id] = S.wst[id] || {}; S.wst[id][en] = {st:'grad', due:'', ok:1, ng:0, last:''}; }));
   S.plans = d.plans || {}; S.stampDate = d.stampDate || '';
-  S.stamps = d.stamps != null ? d.stamps : 4; S.level = d.level || '4'; S.savedAt = d.savedAt || 0;
+  S.stamps = d.stamps != null ? d.stamps : 0; S.level = d.level || '3'; S.savedAt = d.savedAt || 0;
+  if ((d.v || 0) < 3) { S.stamps = 0; S.stampDate = ''; }
+  if (lvlOf(S.level) && lvlOf(S.level).hidden) S.level = '3';
 }
-function saveData(){ return {v:2, savedAt:S.savedAt, exp:S.exp, lvExp:S.lvExp, wst:S.wst, plans:S.plans, stampDate:S.stampDate, stamps:S.stamps, level:S.level}; }
+function saveData(){ return {v:3, savedAt:S.savedAt, exp:S.exp, lvExp:S.lvExp, wst:S.wst, plans:S.plans, stampDate:S.stampDate, stamps:S.stamps, level:S.level}; }
 function save(keepTime){
   if (!keepTime) S.savedAt = Date.now();
   try { localStorage.setItem(SAVE_KEY, JSON.stringify(saveData())); } catch (e) {}
@@ -441,14 +443,14 @@ function home(){
 ${p.finished || empty ? '' : `<button class="btn pink" data-a="start">▶ ${started ? 'つづきから' : 'はじめる'}</button>`}
 ${backlogCard()}
 <div class="panel">${stampCard(S.stamps, -1)}</div>
-<p class="note" style="font-size:11px;color:#888780;">v11 ／ ${gasLine()} ／ この級の単語 ${(lvlOf(S.level).words || []).length}語・まだ出していない単語 ${newList(S.level).length}語</p>
+<p class="note" style="font-size:11px;color:#888780;">v12 ／ ${gasLine()} ／ この級の単語 ${(lvlOf(S.level).words || []).length}語・まだ出していない単語 ${newList(S.level).length}語</p>
 <p class="note">【おうちの人へ】テスト版です。1日に あたらしい単語${NEW_PER_DAY}こ＋ふくしゅう${REV_PER_DAY}こ（上限${DAY_CAP}こ）。最初に○の単語は卒業、×と△は翌日やり直し→○で保留→${HOLD_DAYS}日後に定着確認→○で卒業です。マイクの許可を聞かれたら「許可」を押してください。ボタンを押さなくても、発音のあとにピコの合図で自動で聞き取りが始まります（発音を2回聞いたら、すぐ日本語で答える3秒）。聞き取れた言葉が小さく表示されるので、聞き取りの正確さを確かめられます。${SR ? '' : (IN_FRAME ? '<br><b>この画面（Claudeの中）では声の聞き取りが使えません。画面のボタンで答えて、流れを確かめてください。声で試すときは、GitHubに置いたテスト版を開いてください。</b>' : '<br><b>この端末・ブラウザでは声の聞き取りが使えません。Chromeで開いてください（それまでは画面のボタンで答えられます）。</b>')}</p>`, '#FBEAF0');
 }
 
 function select(){
   S.nextScreen = 'select';
   S.resetArm = false;
-  const rows = LEVELS.map(l => {
+  const rows = LEVELS.filter(l => !l.hidden).map(l => {
     if (l.locked) return `<button class="lvbtn locked" data-a="locked"><span class="lvname">${l.name}</span><span class="lvside">🔒 じゅんびちゅう</span></button>`;
     const L = lvInfo(S.lvExp[l.id] || 0), p = knownPct(l.id);
     return `<button class="lvbtn ${l.id === S.level ? 'sel' : ''}" data-a="pick" data-l="${l.id}">
@@ -456,7 +458,7 @@ function select(){
 <span class="lvside"><span class="lvnum">Lv ${L.l}</span><span class="minibar"><i style="width:${p}%"></i></span><span class="lvpct">おぼえた ${p}%</span></span></button>`;
   }).join('');
   render(`
-<div class="top"><span class="ttl">${NAME}の えいたんご <small>テスト版 v11</small></span><span class="pill lvp">ピコ　けいけんち ${S.exp}</span></div>
+<div class="top"><span class="ttl">${NAME}の えいたんご <small>テスト版 v12</small></span><span class="pill lvp">ピコ　けいけんち ${S.exp}</span></div>
 <div class="center" style="margin-top:10px;"><div class="bub" id="bub">${NAME}、どの レベルを やる？</div>${pico('n', 110)}</div>
 <div style="margin-top:10px;">${rows}</div>
 <div class="note">【おうちの人へ】テスト版です（${NAME}用のリンク）。記録はこの端末と、つないだGoogleの「きろく」に${NAME}の分として保存されます。<br><span id="gasline">${gasLine()}</span>
@@ -742,7 +744,7 @@ const ACT = {
     const b = $('#resetb');
     if (!S.resetArm) { S.resetArm = true; if (b) b.textContent = 'もう一度 おすと けします'; return; }
     try { localStorage.removeItem(SAVE_KEY); } catch (e) {}
-    S.exp = 0; S.lvExp = {'4':0, '3':0}; S.wst = {'4':{}, '3':{}}; S.plans = {}; S.stampDate = ''; S.stamps = 4; S.level = '4';
+    S.exp = 0; S.lvExp = {'4':0, '3':0}; S.wst = {'4':{}, '3':{}}; S.plans = {}; S.stampDate = ''; S.stamps = 0; S.level = '3';
     try { localStorage.removeItem(LOG_KEY()); } catch (e) {}
     save(); pushSave();
     select();
