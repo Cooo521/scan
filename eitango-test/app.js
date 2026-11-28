@@ -173,8 +173,12 @@ function dueList(id, excl){
 }
 function newList(id){ const ws = wsOf(id); return (lvlOf(id).words || []).filter(w => !ws[w.en]); }
 function planFor(id){
-  const t = today(), p = S.plans[id];
-  if (p && p.date === t) return p;
+  const t = today(), p = S.plans[id], byEn = byEnOf(id);
+  if (p && p.date === t) {
+    const items = p.rev.concat(p.nw).filter(en => byEn.has(en));
+    const untouched = Object.keys(p.first).length === 0 && !p.finished;
+    if (!(untouched && (items.length === 0 || items.length < p.rev.length + p.nw.length || newList(id).length > p.nw.length && p.nw.length < NEW_PER_DAY))) return p;
+  }
   const nw = newList(id), newN = Math.min(NEW_PER_DAY, nw.length);
   const revN = nw.length < NEW_PER_DAY ? DAY_CAP - newN : REV_PER_DAY;
   const rv = dueList(id).slice(0, revN);
@@ -395,6 +399,7 @@ function stampCard(n, anim){
 /* ---------- screens ---------- */
 function render(html, bg){
   stopRec();
+  S.screen = S.nextScreen || ''; S.nextScreen = '';
   S.tok++;
   document.body.style.background = bg;
   $app.innerHTML = `<div class="scr">${html}</div>`;
@@ -417,22 +422,26 @@ function backlogCard(){
 ${extra > 0 ? `<button class="btn" data-a="review" style="background:#FAC775;border-color:#BA7517;color:#633806;font-size:18px;">🔁 ふくしゅうだけ やる（${Math.min(REV_PER_DAY, extra)}こ）</button>` : ''}</div>`;
 }
 function home(){
+  S.nextScreen = 'home';
   const L = lvInfo(S.lvExp[S.level]), p = planFor(S.level), byEn = byEnOf(S.level);
   const leftRev = p.rev.filter(en => !(en in p.first) && byEn.has(en)).length, leftNew = p.nw.filter(en => !(en in p.first) && byEn.has(en)).length;
   const started = Object.keys(p.first).length > 0;
+  const empty = p.rev.length + p.nw.length === 0;
   const bub = p.finished ? `${NAME}、きょうの ぶんは おわり！<br>また あしたね♪`
+    : empty ? `${NAME}、きょうの たんごが ないよ<br>（ぜんぶ おぼえたか、よみこみ中）`
     : (leftRev + leftNew === 0 ? `${NAME}、もう1回タイムの つづきだよ！` : `${NAME}、きょうは ${leftRev + leftNew}まい！<br>あたらしい ${leftNew}・ふくしゅう ${leftRev}`);
   render(`
 <div class="top"><button class="sbtn" data-a="select">← レベルを かえる</button><span class="pill lvp">${lvlOf(S.level).name}　Lv ${L.l}</span></div>
 <div class="bar"><i style="width:${pct(L)}%"></i></div>
 <div class="center"><div class="bub">${bub}</div>${pico(p.finished ? 'h' : 'n', 130)}</div>
-${p.finished ? '' : `<button class="btn pink" data-a="start">▶ ${started ? 'つづきから' : 'はじめる'}</button>`}
+${p.finished || empty ? '' : `<button class="btn pink" data-a="start">▶ ${started ? 'つづきから' : 'はじめる'}</button>`}
 ${backlogCard()}
 <div class="panel">${stampCard(S.stamps, -1)}</div>
 <p class="note">【おうちの人へ】テスト版です。1日に あたらしい単語${NEW_PER_DAY}こ＋ふくしゅう${REV_PER_DAY}こ（上限${DAY_CAP}こ）。最初に○の単語は卒業、×と△は翌日やり直し→○で保留→${HOLD_DAYS}日後に定着確認→○で卒業です。マイクの許可を聞かれたら「許可」を押してください。ボタンを押さなくても、発音のあとにピコの合図で自動で聞き取りが始まります（発音を2回聞いたら、すぐ日本語で答える3秒）。聞き取れた言葉が小さく表示されるので、聞き取りの正確さを確かめられます。${SR ? '' : (IN_FRAME ? '<br><b>この画面（Claudeの中）では声の聞き取りが使えません。画面のボタンで答えて、流れを確かめてください。声で試すときは、GitHubに置いたテスト版を開いてください。</b>' : '<br><b>この端末・ブラウザでは声の聞き取りが使えません。Chromeで開いてください（それまでは画面のボタンで答えられます）。</b>')}</p>`, '#FBEAF0');
 }
 
 function select(){
+  S.nextScreen = 'select';
   S.resetArm = false;
   const rows = LEVELS.map(l => {
     if (l.locked) return `<button class="lvbtn locked" data-a="locked"><span class="lvname">${l.name}</span><span class="lvside">🔒 じゅんびちゅう</span></button>`;
@@ -442,7 +451,7 @@ function select(){
 <span class="lvside"><span class="lvnum">Lv ${L.l}</span><span class="minibar"><i style="width:${p}%"></i></span><span class="lvpct">おぼえた ${p}%</span></span></button>`;
   }).join('');
   render(`
-<div class="top"><span class="ttl">${NAME}の えいたんご <small>テスト版 v7</small></span><span class="pill lvp">ピコ　けいけんち ${S.exp}</span></div>
+<div class="top"><span class="ttl">${NAME}の えいたんご <small>テスト版 v8</small></span><span class="pill lvp">ピコ　けいけんち ${S.exp}</span></div>
 <div class="center" style="margin-top:10px;"><div class="bub" id="bub">${NAME}、どの レベルを やる？</div>${pico('n', 110)}</div>
 <div style="margin-top:10px;">${rows}</div>
 <div class="note">【おうちの人へ】テスト版です（${NAME}用のリンク）。記録はこの端末と、つないだGoogleの「きろく」に${NAME}の分として保存されます。<br><span id="gasline">${gasLine()}</span>
@@ -755,4 +764,4 @@ $app.addEventListener('click', e => {
 })();
 loadSave();
 select();
-syncStart().then(() => { if (!S.run && document.getElementById('gasline')) select(); });
+syncStart().then(() => { if (S.screen === 'select') select(); else if (S.screen === 'home') home(); });
