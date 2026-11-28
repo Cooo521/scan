@@ -373,7 +373,7 @@ function home(){
 <div class="center"><div class="bub">きょうは ${words().length}まい！<br>いっしょに がんばろ♪</div>${pico('n', 140)}</div>
 <button class="btn pink" data-a="start">▶ はじめる</button>
 <div class="panel">${stampCard(S.stamps, -1)}</div>
-<p class="note">【おうちの人へ】テスト版です（単語5つ）。マイクの許可を聞かれたら「許可」を押してください。ボタンを押さなくても、発音のあとにピコの合図で自動で聞き取りが始まります（発音を2回聞いてまねしたら、日本語で答える3秒）。聞き取れた言葉が小さく表示されるので、聞き取りの正確さを確かめられます。${SR ? '' : (IN_FRAME ? '<br><b>この画面（Claudeの中）では声の聞き取りが使えません。画面のボタンで答えて、流れを確かめてください。声で試すときは、GitHubに置いたテスト版を開いてください。</b>' : '<br><b>この端末・ブラウザでは声の聞き取りが使えません。Chromeで開いてください（それまでは画面のボタンで答えられます）。</b>')}</p>`, '#FBEAF0');
+<p class="note">【おうちの人へ】テスト版です（単語5つ）。マイクの許可を聞かれたら「許可」を押してください。ボタンを押さなくても、発音のあとにピコの合図で自動で聞き取りが始まります（発音を2回聞いたら、すぐ日本語で答える3秒）。聞き取れた言葉が小さく表示されるので、聞き取りの正確さを確かめられます。${SR ? '' : (IN_FRAME ? '<br><b>この画面（Claudeの中）では声の聞き取りが使えません。画面のボタンで答えて、流れを確かめてください。声で試すときは、GitHubに置いたテスト版を開いてください。</b>' : '<br><b>この端末・ブラウザでは声の聞き取りが使えません。Chromeで開いてください（それまでは画面のボタンで答えられます）。</b>')}</p>`, '#FBEAF0');
 }
 
 function select(){
@@ -420,7 +420,7 @@ function showCard(){
 <div id="hintbox" class="hintbox ${R.hint ? 'show' : ''}">${hintPic(w)}</div>
 <button class="round" data-a="again" aria-label="もう一度きく">🔊</button>
 </div>
-<div class="center" style="margin-top:16px;"><div class="bub" id="bub">よく きいて まねしてね♪</div></div>
+<div class="center" style="margin-top:16px;"><div class="bub" id="bub">よく きいてね♪</div></div>
 <div class="microw">${pico('n', 64)}<div class="ear" id="ear"><span class="earic">🎤</span><span class="count" id="count"></span></div><div style="width:64px"></div></div>
 <p class="heard" id="heard"></p>
 <div class="center"><button class="sbtn hintb" id="hintbtn" data-a="hint" ${R.hint ? 'style="display:none"' : ''}>💡 ヒント</button></div>
@@ -430,14 +430,13 @@ function showCard(){
 function setBub(t){ const b = $('#bub'); if (b) b.textContent = t; }
 function setHeard(t){ const h = $('#heard'); if (h) h.textContent = t; }
 
-/* 1ページで自動：発音2回（いっしょに まねする） → 日本語で答える(3秒) */
+/* 1ページで自動：発音2回 → すぐ日本語で答える(3秒) */
 async function runCard(){
   const R = S.run, w = cur(), tk = S.tok;
   const alive = () => tk === S.tok && S.run === R;
-  setBub('よく きいて まねしてね♪');
+  setBub('よく きいてね♪');
   await speakWord(w); if (!alive()) return;
   if (!SR) { setBub('こたえを いったら したの ボタンを おしてね'); return; }
-  await sleep(400); if (!alive()) return;
   R.step = 2;
   await answerPhase(tk, 0);
 }
@@ -445,7 +444,7 @@ async function answerPhase(tk, attempt){
   const R = S.run, w = cur();
   const alive = () => tk === S.tok && S.run === R;
   setBub(attempt ? 'もう1回 いくよ！ にほんごで いうと？' : 'にほんごで いうと？ せーの！');
-  await sleep(800); if (!alive()) return;
+  await sleep(500); if (!alive()) return;
   setHeard('');
   const a = await listenFor('ja-JP', 3000); if (!alive()) return;
   if (a.alts) { R.heard = a.alts[0]; R.heardAll = a.alts.join(' / '); judge(jaOk(a.alts, w), true); return; }
