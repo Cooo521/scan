@@ -32,7 +32,9 @@ const lvlOf = id => LEVELS.find(l => l.id === id);
 /* ---------- Google（受け取り係）とのやりとり ---------- */
 const GAS_KEY = 'eitango-gas', WCACHE_KEY = 'eitango-words-cache';
 const THEMES = {'ようす・てんき':['#FAEEDA','#633806'], 'たべもの':['#FBEAF0','#72243E'], 'どうぶつ':['#E1F5EE','#085041'],
-  'がっこう・ともだち':['#E6F1FB','#0C447C'], 'きもち・あたま':['#EEEDFE','#3C3489'], 'まち':['#EAF3DE','#27500A'], 'うごき':['#FAECE7','#712B13']};
+  'がっこう・ともだち':['#E6F1FB','#0C447C'], 'きもち・あたま':['#EEEDFE','#3C3489'], 'まち':['#EAF3DE','#27500A'], 'うごき':['#FAECE7','#712B13'],
+  'いえ・かぞく':['#FBEAF0','#993556'], 'からだ':['#FAECE7','#993C1D'], 'じかん・かず':['#E6F1FB','#185FA5'], 'しぜん':['#EAF3DE','#3B6D11'],
+  'スポーツ・あそび':['#E1F5EE','#0F6E56'], 'ことば':['#F1EFE8','#444441'], 'しごと・せかい':['#EEEDFE','#534AB7']};
 const G = {url:'', status:'off', msg:''};
 function lsGet(k){ try { return localStorage.getItem(k); } catch (e) { return null; } }
 function lsSet(k, v){ try { localStorage.setItem(k, v); } catch (e) {} }
@@ -439,7 +441,7 @@ function home(){
 ${p.finished || empty ? '' : `<button class="btn pink" data-a="start">▶ ${started ? 'つづきから' : 'はじめる'}</button>`}
 ${backlogCard()}
 <div class="panel">${stampCard(S.stamps, -1)}</div>
-<p class="note" style="font-size:11px;color:#888780;">v10 ／ ${gasLine()} ／ この級の単語 ${(lvlOf(S.level).words || []).length}語・まだ出していない単語 ${newList(S.level).length}語</p>
+<p class="note" style="font-size:11px;color:#888780;">v11 ／ ${gasLine()} ／ この級の単語 ${(lvlOf(S.level).words || []).length}語・まだ出していない単語 ${newList(S.level).length}語</p>
 <p class="note">【おうちの人へ】テスト版です。1日に あたらしい単語${NEW_PER_DAY}こ＋ふくしゅう${REV_PER_DAY}こ（上限${DAY_CAP}こ）。最初に○の単語は卒業、×と△は翌日やり直し→○で保留→${HOLD_DAYS}日後に定着確認→○で卒業です。マイクの許可を聞かれたら「許可」を押してください。ボタンを押さなくても、発音のあとにピコの合図で自動で聞き取りが始まります（発音を2回聞いたら、すぐ日本語で答える3秒）。聞き取れた言葉が小さく表示されるので、聞き取りの正確さを確かめられます。${SR ? '' : (IN_FRAME ? '<br><b>この画面（Claudeの中）では声の聞き取りが使えません。画面のボタンで答えて、流れを確かめてください。声で試すときは、GitHubに置いたテスト版を開いてください。</b>' : '<br><b>この端末・ブラウザでは声の聞き取りが使えません。Chromeで開いてください（それまでは画面のボタンで答えられます）。</b>')}</p>`, '#FBEAF0');
 }
 
@@ -454,7 +456,7 @@ function select(){
 <span class="lvside"><span class="lvnum">Lv ${L.l}</span><span class="minibar"><i style="width:${p}%"></i></span><span class="lvpct">おぼえた ${p}%</span></span></button>`;
   }).join('');
   render(`
-<div class="top"><span class="ttl">${NAME}の えいたんご <small>テスト版 v10</small></span><span class="pill lvp">ピコ　けいけんち ${S.exp}</span></div>
+<div class="top"><span class="ttl">${NAME}の えいたんご <small>テスト版 v11</small></span><span class="pill lvp">ピコ　けいけんち ${S.exp}</span></div>
 <div class="center" style="margin-top:10px;"><div class="bub" id="bub">${NAME}、どの レベルを やる？</div>${pico('n', 110)}</div>
 <div style="margin-top:10px;">${rows}</div>
 <div class="note">【おうちの人へ】テスト版です（${NAME}用のリンク）。記録はこの端末と、つないだGoogleの「きろく」に${NAME}の分として保存されます。<br><span id="gasline">${gasLine()}</span>
