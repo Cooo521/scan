@@ -26,7 +26,82 @@ const LEVELS = [
   {id:'p2', name:'準2級レベル', locked:true},
   {id:'2', name:'2級レベル', locked:true}
 ];
+LEVELS.forEach(l => (l.words || []).forEach(w => { if (w.ex.length === 2) w.ex = [w.ex[0], w.en, w.ex[1]]; }));
 const lvlOf = id => LEVELS.find(l => l.id === id);
+
+/* ---------- Google（受け取り係）とのやりとり ---------- */
+const GAS_KEY = 'eitango-gas', WCACHE_KEY = 'eitango-words-cache';
+const THEMES = {'ようす・てんき':['#FAEEDA','#633806'], 'たべもの':['#FBEAF0','#72243E'], 'どうぶつ':['#E1F5EE','#085041'],
+  'がっこう・ともだち':['#E6F1FB','#0C447C'], 'きもち・あたま':['#EEEDFE','#3C3489'], 'まち':['#EAF3DE','#27500A'], 'うごき':['#FAECE7','#712B13']};
+const G = {url:'', status:'off', msg:''};
+function lsGet(k){ try { return localStorage.getItem(k); } catch (e) { return null; } }
+function lsSet(k, v){ try { localStorage.setItem(k, v); } catch (e) {} }
+function splitMark(t){
+  const m = /^(.*?)【(.*?)】(.*)$/.exec(t || '');
+  return m ? [m[1], m[2], m[3]] : null;
+}
+function rowToWord(r){
+  const en = String(r.en || '').trim(); if (!en) return null;
+  const ja = String(r.ja || '').split(/[、,，\s]+/).map(x => x.trim()).filter(Boolean);
+  let ex = splitMark(r.ex);
+  if (!ex && r.ex) {
+    const i = r.ex.toLowerCase().indexOf(en.toLowerCase());
+    ex = i >= 0 ? [r.ex.slice(0, i), r.ex.slice(i, i + en.length), r.ex.slice(i + en.length)] : [r.ex, '', ''];
+  }
+  const exJa = splitMark(r.exJa) || [r.exJa || '', '', ''];
+  const th = THEMES[r.theme] || ['#F1EFE8', '#444441'];
+  return {en, ja:ja.length ? ja : [en], main:r.main || ja[0] || '', emoji:r.emoji || '⭐', theme:r.theme || 'たんご', tc:th[0], tt:th[1],
+    ex:ex || [en, '', ''], exJa, pair:r.pairEn ? {lbl:r.pairLbl || 'なかま', emoji:r.pairEmoji || '', en:r.pairEn, ja:r.pairJa || ''} : null,
+    illust:en.toLowerCase() === 'borrow'};
+}
+function applyWords(levels){
+  let n = 0;
+  LEVELS.forEach(l => {
+    const rows = (levels || {})[l.id];
+    if (l.locked || !rows || !rows.length) return;
+    const ws = rows.map(rowToWord).filter(Boolean);
+    if (ws.length) { l.words = ws; n += ws.length; }
+  });
+  return n;
+}
+function gasGet(params){
+  const q = Object.keys(params).map(k => k + '=' + encodeURIComponent(params[k])).join('&');
+  return fetch(G.url + (G.url.includes('?') ? '&' : '?') + q, {redirect:'follow'}).then(r => r.json());
+}
+function gasPost(body){
+  return fetch(G.url, {method:'POST', body:JSON.stringify(body), redirect:'follow'}).then(r => r.json());
+}
+function summary(){
+  const L4 = lvInfo(S.lvExp['4'] || 0), L3 = lvInfo(S.lvExp['3'] || 0);
+  const k = id => `${knownCount(id)}/${(lvlOf(id).words || []).length}語`;
+  return {exp:S.exp, lv4:L4.l, known4:k('4'), lv3:L3.l, known3:k('3'), stamps:S.stamps};
+}
+function pushSave(){
+  if (!G.url) return Promise.resolve(false);
+  lsSet(SAVE_KEY + ':pending', '1');
+  return gasPost({a:'save', c:USER.id, data:{v:1, savedAt:S.savedAt, exp:S.exp, lvExp:S.lvExp, known:S.known, stamps:S.stamps, level:S.level, summary:summary()}})
+    .then(j => { if (j && j.ok) { try { localStorage.removeItem(SAVE_KEY + ':pending'); } catch (e) {} G.status = 'ok'; return true; } throw new Error((j && j.error) || 'save'); })
+    .catch(() => { G.status = 'err'; return false; });
+}
+async function syncStart(){
+  try { const c = JSON.parse(lsGet(WCACHE_KEY) || 'null'); if (c) applyWords(c); } catch (e) {}
+  G.url = lsGet(GAS_KEY) || '';
+  if (!G.url) { G.status = 'off'; return; }
+  G.status = 'wait';
+  try {
+    const [w, r] = await Promise.all([gasGet({a:'words'}), gasGet({a:'load', c:USER.id})]);
+    if (w && w.ok) { G.count = applyWords(w.levels); lsSet(WCACHE_KEY, JSON.stringify(w.levels)); }
+    if (r && r.ok && r.rec && (r.rec.savedAt || 0) > (S.savedAt || 0)) { adoptSave(r.rec); save(true); }
+    G.status = 'ok';
+    if (lsGet(SAVE_KEY + ':pending')) await pushSave();
+  } catch (e) { G.status = 'err'; }
+}
+function gasLine(){
+  if (G.status === 'off') return 'Google：まだ つないでいません（アプリの中の単語で動きます）';
+  if (G.status === 'wait') return 'Google：よみこみ中…';
+  if (G.status === 'ok') return `Google：つながっています（単語 4級${(lvlOf('4').words || []).length}・3級${(lvlOf('3').words || []).length}）`;
+  return 'Google：つながりませんでした（端末の中の控えで動きます。記録はあとで送ります）';
+}
 function words(){ return lvlOf(S.level).words; }
 
 const IN_FRAME = (() => { try { return window.self !== window.top; } catch (e) { return true; } })();
@@ -46,14 +121,20 @@ function loadSave(){
     let raw = localStorage.getItem(SAVE_KEY);
     if (!raw && USER.id === 'rio') raw = localStorage.getItem('eitango-test-v1');
     const d = JSON.parse(raw || 'null');
-    if (d) { S.exp = d.exp || 0; S.lvExp = Object.assign(S.lvExp, d.lvExp || {}); S.known = Object.assign(S.known, d.known || {}); S.stamps = d.stamps != null ? d.stamps : 4; S.level = d.level || '4'; }
+    if (d) adoptSave(d);
   } catch (e) {}
 }
-function save(){
-  try { localStorage.setItem(SAVE_KEY, JSON.stringify({exp:S.exp, lvExp:S.lvExp, known:S.known, stamps:S.stamps, level:S.level})); } catch (e) {}
+function adoptSave(d){
+  S.exp = d.exp || 0; S.lvExp = Object.assign({'4':0, '3':0}, d.lvExp || {}); S.known = Object.assign({'4':[], '3':[]}, d.known || {});
+  S.stamps = d.stamps != null ? d.stamps : 4; S.level = d.level || '4'; S.savedAt = d.savedAt || 0;
+}
+function save(keepTime){
+  if (!keepTime) S.savedAt = Date.now();
+  try { localStorage.setItem(SAVE_KEY, JSON.stringify({savedAt:S.savedAt, exp:S.exp, lvExp:S.lvExp, known:S.known, stamps:S.stamps, level:S.level})); } catch (e) {}
 }
 function addExp(n){ S.exp += n; S.lvExp[S.level] = (S.lvExp[S.level] || 0) + n; }
-function knownPct(id){ const l = lvlOf(id); return l.words ? Math.round((S.known[id] || []).length / l.words.length * 100) : 0; }
+function knownCount(id){ const l = lvlOf(id), k = new Set(S.known[id] || []); return (l.words || []).filter(w => k.has(w.en)).length; }
+function knownPct(id){ const l = lvlOf(id); return l.words && l.words.length ? Math.round(knownCount(id) / l.words.length * 100) : 0; }
 
 function need(l){ return 40 + l * 20; }
 function lvInfo(exp){ let l = 1, e = exp; while (e >= need(l)) { e -= need(l); l++; } return {l, cur:e, need:need(l)}; }
@@ -114,7 +195,7 @@ async function speakWord(w){
   await sleep(350); if (tk !== S.tok) return;
   await say(w.en, 'en-US', 0.95);
 }
-function exText(w){ return w.ex[0] + w.en + w.ex[1]; }
+function exText(w){ return w.ex.join(''); }
 async function speakEx(w, slow){
   const tk = S.tok;
   try { speechSynthesis.cancel(); } catch (e) {}
@@ -221,7 +302,7 @@ function borrowSvg(width){
 <text x="36" y="98" text-anchor="middle" font-size="11" fill="#4B1528">ともだち</text>
 <text x="164" y="98" text-anchor="middle" font-size="11" fill="#4B1528">わたし</text></svg>`;
 }
-function hintPic(w){ return w.illust ? borrowSvg(170) : `<span class="hintem">${w.emoji}</span>`; }
+function hintPic(w){ return w.illust ? borrowSvg(170) : `<span class="hintem">${esc(w.emoji)}</span>`; }
 function confetti(){
   const cols = ['#ED93B1', '#5DCAA5', '#EF9F27', '#AFA9EC', '#F4C0D1', '#FAC775'];
   for (let i = 0; i < 26; i++) {
@@ -275,10 +356,12 @@ function select(){
 <span class="lvside"><span class="lvnum">Lv ${L.l}</span><span class="minibar"><i style="width:${p}%"></i></span><span class="lvpct">おぼえた ${p}%</span></span></button>`;
   }).join('');
   render(`
-<div class="top"><span class="ttl">${NAME}の えいたんご <small>テスト版 v5</small></span><span class="pill lvp">ピコ　けいけんち ${S.exp}</span></div>
+<div class="top"><span class="ttl">${NAME}の えいたんご <small>テスト版 v6</small></span><span class="pill lvp">ピコ　けいけんち ${S.exp}</span></div>
 <div class="center" style="margin-top:10px;"><div class="bub" id="bub">${NAME}、どの レベルを やる？</div>${pico('n', 110)}</div>
 <div style="margin-top:10px;">${rows}</div>
-<p class="note">【おうちの人へ】テスト版です（${NAME}用のリンク）。記録はこの端末のブラウザの中に、${NAME}の分として保存されます（4級・3級それぞれ単語5つ）。<button class="sbtn" data-a="reset" id="resetb" style="font-size:12px;padding:4px 10px;">きろくを けす</button></p>`, '#FBEAF0');
+<div class="note">【おうちの人へ】テスト版です（${NAME}用のリンク）。記録はこの端末と、つないだGoogleの「きろく」に${NAME}の分として保存されます。<br><span id="gasline">${gasLine()}</span>
+<div id="gasbox" style="display:none;margin-top:8px;"><input id="gasurl" type="url" placeholder="https://script.google.com/macros/s/…/exec" style="width:100%;font-size:16px;padding:8px;border-radius:10px;border:1px solid #ED93B1;box-sizing:border-box;"><button class="sbtn" data-a="gasok" style="margin-top:6px;">つなぐ</button> <span id="gasmsg"></span></div>
+<div style="margin-top:8px;display:flex;gap:6px;flex-wrap:wrap;"><button class="sbtn" data-a="gasopen" style="font-size:12px;padding:4px 10px;">Googleと つなぐ</button><button class="sbtn" data-a="reset" id="resetb" style="font-size:12px;padding:4px 10px;">きろくを けす</button></div></div>`, '#FBEAF0');
 }
 
 function startRun(){
@@ -304,8 +387,8 @@ function showCard(){
   render(`
 <div class="top">${progressHtml()}${R.phase === 'main' && R.combo >= 2 ? `<span class="pill cmb">🔥 ${R.combo}コンボ</span>` : ''}</div>
 <div class="card"><div class="tape"></div>
-<span class="pill" style="background:${w.tc};color:${w.tt};font-size:12px;font-weight:500;">${w.theme}</span>
-<div class="word">${w.en}</div>
+<span class="pill" style="background:${w.tc};color:${w.tt};font-size:12px;font-weight:500;">${esc(w.theme)}</span>
+<div class="word">${esc(w.en)}</div>
 <div id="hintbox" class="hintbox ${R.hint ? 'show' : ''}">${hintPic(w)}</div>
 <button class="round" data-a="again" aria-label="もう一度きく">🔊</button>
 </div>
@@ -381,9 +464,9 @@ function revertResult(){
 
 function exHtml(w){
   return `<div class="exbox"><span class="pill exl">れいぶん</span>
-<div class="exrow"><p class="exen">${w.ex[0]}<span class="hw">${w.en}</span>${w.ex[1]}</p><button class="round sm" data-a="sayex" aria-label="れいぶんをきく">🔊</button></div>
-<p class="exja">${w.exJa[0]}<span class="hw">${w.exJa[1]}</span>${w.exJa[2]}</p></div>
-${w.pair ? `<p class="pair">${w.pair.lbl}　${w.pair.emoji} ${w.pair.en} ＝ ${w.pair.ja}</p>` : ''}`;
+<div class="exrow"><p class="exen">${esc(w.ex[0])}<span class="hw">${esc(w.ex[1])}</span>${esc(w.ex[2])}</p><button class="round sm" data-a="sayex" aria-label="れいぶんをきく">🔊</button></div>
+<p class="exja">${esc(w.exJa[0])}<span class="hw">${esc(w.exJa[1])}</span>${esc(w.exJa[2])}</p></div>
+${w.pair ? `<p class="pair">${esc(w.pair.lbl)}　${esc(w.pair.emoji)} ${esc(w.pair.en)} ＝ ${esc(w.pair.ja)}</p>` : ''}`;
 }
 function illuHtml(w){
   return w.illust ? `<div class="illu">${borrowSvg(190)}<p>（苦手単語になると、こんな絵がつきます）</p></div>` : '';
@@ -400,7 +483,7 @@ function showAnswer(){
 <p class="res-t" style="color:#D4537E;">${title}</p>
 <p class="small" style="font-size:16px;font-weight:700;margin-top:2px;">${PRAISE[praiseN++ % PRAISE.length]}</p>
 ${pico('h', 120, 'bounce')}
-<div class="panel"><div class="answ"><span class="em">${w.emoji}</span> ${w.en} ＝ ${w.main}</div>${illuHtml(w)}</div>
+<div class="panel"><div class="answ"><span class="em">${esc(w.emoji)}</span> ${esc(w.en)} ＝ ${esc(w.main)}</div>${illuHtml(w)}</div>
 ${exHtml(w)}
 <div class="pills">${pills.join('')}</div>
 ${R.phase === 'main' && out === 'd' ? '<p class="small">もう1回タイムで もう一度 でるよ</p>' : ''}
@@ -411,7 +494,7 @@ ${heardLine}
     render(`
 <p class="res-t" style="color:#854F0B;">おしい！</p>
 <div class="center" style="margin-top:8px;"><div class="bub">だいじょうぶ、${NAME}！<br>あとで もう1回 でるよ</div>${pico('n', 90)}</div>
-<div class="panel"><div class="bigem">${w.emoji}</div><div class="answ">${w.en} ＝ ${w.main}</div>${illuHtml(w)}</div>
+<div class="panel"><div class="bigem">${esc(w.emoji)}</div><div class="answ">${esc(w.en)} ＝ ${esc(w.main)}</div>${illuHtml(w)}</div>
 ${exHtml(w)}
 ${R.phase === 'main' ? '<div class="pills"><span class="pill xp">+2 チャレンジ</span></div>' : ''}
 ${heardLine}
@@ -459,6 +542,7 @@ function finish(){
   words().forEach(w => { if (R.first[w.en] === 'o') kn.add(w.en); });
   S.known[S.level] = [...kn];
   save();
+  pushSave().then(ok => { const g = $('#savemsg'); if (g) g.textContent = ok ? 'きろくを Googleに ほぞんしました' : (G.url ? 'Googleには あとで ほぞんします' : ''); });
   const g = R.gains, from = lvInfo(R.expStart);
   const rows = [
     ['○ せいかい', g.o, true], ['△ ヒントで せいかい', g.d], ['× チャレンジ', g.x], ['コンボ ボーナス', g.combo],
@@ -478,6 +562,7 @@ ${R.maxCombo >= 2 ? `<p class="small">さいこう ${R.maxCombo}コンボ</p>` :
 <div class="bar big"><i id="xbar" style="width:${pct(from)}%"></i></div>
 <p class="small" id="xnext" style="text-align:right;">&nbsp;</p>
 <div class="gains">${rows}<div class="gr tot"><span>ごうけい</span><span>+${total}</span></div></div></div>
+<p class="small" id="savemsg" style="font-size:12px;color:#5F5E5A;"></p>
 <button class="btn pink" data-a="home">ホームへ</button>`, '#FBEAF0');
   confetti();
   const tk = S.tok;
@@ -510,13 +595,24 @@ async function animateExp(fromExp, toExp, tk){
 const ACT = {
   start: startRun,
   select: select,
-  pick(d){ S.level = d.l; save(); home(); },
+  pick(d){ S.level = d.l; save(); pushSave(); home(); },
+  gasopen(){ const b = $('#gasbox'); if (b) b.style.display = 'block'; const i = $('#gasurl'); if (i) i.value = G.url || ''; },
+  async gasok(){
+    const i = $('#gasurl'), m = $('#gasmsg'); const u = (i ? i.value : '').trim();
+    if (!/^https:\/\/script\.google(usercontent)?\.com\//.test(u)) { if (m) m.textContent = 'URLが ちがうみたい（https://script.google.com/… を はりつけてね）'; return; }
+    if (m) m.textContent = 'たしかめています…';
+    G.url = u;
+    try { const j = await gasGet({a:'words'}); if (!j || !j.ok) throw new Error('ng'); }
+    catch (e) { if (m) m.textContent = 'つながりませんでした。URLと「アクセスできるユーザー：全員」を たしかめてね'; G.url = lsGet(GAS_KEY) || ''; return; }
+    lsSet(GAS_KEY, u); await syncStart(); await pushSave(); select();
+  },
   locked(){ setBub('もうすぐ できるよ！ まっててね'); },
   reset(){
     const b = $('#resetb');
     if (!S.resetArm) { S.resetArm = true; if (b) b.textContent = 'もう一度 おすと けします'; return; }
     try { localStorage.removeItem(SAVE_KEY); } catch (e) {}
     S.exp = 0; S.lvExp = {'4':0, '3':0}; S.known = {'4':[], '3':[]}; S.stamps = 4; S.level = '4';
+    save(); pushSave();
     select();
   },
   again(){ showCard(); },
@@ -535,5 +631,10 @@ $app.addEventListener('click', e => {
   const f = ACT[b.dataset.a]; if (f) f(b.dataset);
 });
 
+(function setupFromHash(){
+  const m = /[#&]gas=([^&]+)/.exec(location.hash || '');
+  if (m) { lsSet(GAS_KEY, decodeURIComponent(m[1])); history.replaceState(null, '', location.pathname + location.search); }
+})();
 loadSave();
 select();
+syncStart().then(() => { if (!S.run && document.getElementById('gasline')) select(); });
